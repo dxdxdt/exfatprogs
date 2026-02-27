@@ -2,7 +2,7 @@
 
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = lib mkfs fsck tune label dump exfat2img
+SUBDIRS = lib mkfs fsck tune label dump exfat2img dosattr
 
 # manpages
 dist_man8_MANS =		\
@@ -11,7 +11,9 @@ dist_man8_MANS =		\
 	manpages/mkfs.exfat.8	\
 	manpages/exfatlabel.8	\
 	manpages/dump.exfat.8	\
-	manpages/exfat2img.8
+	manpages/exfat2img.8	\
+	manpages/lsdosattr.1	\
+	manpages/chdosattr.1
 
 # other stuff
 EXTRA_DIST =			\
