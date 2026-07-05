@@ -38,15 +38,73 @@ struct exfat {
 	clus_t			clus_count;
 	unsigned int		clus_size;
 	unsigned int		sect_size;
+	/* cached `sysconf(_SC_PAGE_SIZE)` */
+	long			pagesize;
+	/* Actual start address of memory allocated for `disk_bitmap` */
+	void			*disk_bitmap_m;
+	/* Actual size of `disk_bitmap_m` */
+	size_t			disk_bitmap_msize;
+	/*
+	 * Offset to the allocation bitmap on disk(for calloc() and read/write()
+	 * method)
+	 */
+	off_t			disk_bitmap_devofs;
+	/*
+	 * The allocation bitmap as stored on disk.
+	 *
+	 * Can be either a mmap()'d region of the block device or good-old
+	 * calloc()'d and read()'d from disk.
+	 */
 	unsigned char		*disk_bitmap;
+	/*
+	 * Ephemeral bitmap allocation for authoring a new allocation bitmap or
+	 * repairing the existing one.
+	 *
+	 * Can be either file-backed mapping or good-old calloc() memory.
+	 */
 	unsigned char		*alloc_bitmap;
-	unsigned char		*ohead_bitmap;
+	/*
+	 * The byte size of allocation bitmap(both `disk_bitmap` and
+	 * `alloc_bitmap`) in multiple of sizeof(bitmap_t). The valid length
+	 * could be less than this.
+	 *
+	 * Unfortunately, 'bitmap_size' is a macro define, hence the "bm_"
+	 * prefix.
+	 */
+	size_t			bm_size;
+	/*
+	 * The exact valid byte length of allocation bitmap.
+	 *
+	 * The size actually allocated may be much more than this and even
+	 * `bm_size` due to the page size alignment requirement of mmap().
+	 */
+	size_t			bm_len;
 	clus_t			disk_bitmap_clus;
-	unsigned int		disk_bitmap_size;
 	__u16			*upcase_table;
 	clus_t			start_clu;
 	unsigned int		buffer_count;
 	struct buffer_desc	*lookup_buffer; /* for dentry set lookup */
+
+	/*
+	 * Callback after changing the contents of `disk_bitmap`.
+	 *
+	 * If `disk_bitmap` is regular calloc()'d memory and its contents read()
+	 * from the disk, write() will be done in the function. If the address
+	 * is mmap()'d, this is NULL because write() is handled in kernel.
+	 */
+	bool (*invalidate_disk_bitmap)(struct exfat *exfat, size_t ofs, size_t len);
+	/*
+	 * Callback for requesting sync of `disk_bitmap`.
+	 *
+	 * Currently, this is only set for mmap()'d `disk_bitmap` to msync()
+	 * the dirty pages. It's NULL otherwise because fsync() is issued
+	 * elsewhere prior to process exit.
+	 */
+	bool (*sync_disk_bitmap)(struct exfat *exfat);
+	/* Callback to free up `disk_bitmap`(free() or munmap()) */
+	void (*free_disk_bitmap)(struct exfat *exfat);
+	/* Callback to free up `alloc_bitmap`(free() or munmap()) */
+	void (*free_alloc_bitmap)(struct exfat *exfat);
 };
 
 struct exfat_dentry_loc {
@@ -69,7 +127,7 @@ struct buffer_desc {
 };
 
 struct exfat *exfat_alloc_exfat(struct exfat_blk_dev *blk_dev, struct pbr *bs,
-				 struct exfat_inode *root);
+		struct exfat_inode *root, const bool need_amap);
 void exfat_free_exfat(struct exfat *exfat);
 
 struct exfat_inode *exfat_alloc_inode(__u16 attr);
@@ -86,6 +144,8 @@ int exfat_resolve_path_parent(struct path_resolve_ctx *ctx,
 
 struct buffer_desc *exfat_alloc_buffer(struct exfat *exfat);
 void exfat_free_buffer(const struct exfat *exfat, struct buffer_desc *bd);
+
+bool exfat_load_disk_bitmap(struct exfat *exfat, const off_t loc, const bool rw);
 
 static inline unsigned int exfat_get_read_size(const struct exfat *exfat)
 {

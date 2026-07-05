@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <locale.h>
 #include <inttypes.h>
+#include <assert.h>
 
 #include "exfat_ondisk.h"
 #include "libexfat.h"
@@ -187,18 +188,24 @@ static int exfat_show_fs_info(struct exfat *exfat)
 		dump_field("Bitmap start cluster", "%x", bitmap_clu);
 		dump_field("Bitmap size", "%llu", bitmap_len);
 
-		if (bitmap_len > EXFAT_BITMAP_SIZE(exfat->clus_count)) {
+		/*
+		 * FIXME shouldn't it be `bitmap_len < exfat->bm_len` ???
+		 * The spec says nothing about this. fsck expects the exact size
+		 * (DIV_ROUND_UP(exfat->clus_count, 8)).
+		 */
+		if (bitmap_len > exfat->bm_size) {
 			exfat_err("Invalid bitmap size: %llu\n", bitmap_len);
 			return -EINVAL;
 		}
 
-		if (!exfat_read_full(bd->dev_fd, exfat->disk_bitmap, bitmap_len,
-				exfat_c2o(exfat, bitmap_clu))) {
-			exfat_err("bitmap read failed: %d\n", errno);
-			return -EIO;
+		if (!exfat_load_disk_bitmap(exfat, exfat_c2o(exfat, bitmap_clu), false)) {
+			const int saved_errno = errno;
+
+			exfat_err("bitmap read failed: %s\n", strerror(errno));
+			return -saved_errno;
 		}
 
-		used_clus = exfat_count_used_clusters(exfat->disk_bitmap, (size_t)bitmap_len,
+		used_clus = exfat_count_used_clusters(exfat->disk_bitmap, exfat->bm_len,
 						      exfat->clus_count);
 
 		exfat_info("\n---------------- Show the statistics ----------------\n");
@@ -427,6 +434,8 @@ static void exfat_show_cluster_chain(struct exfat *exfat,
 	clus_t clu, next_clu;
 	clus_t count = 0, num_clus;
 	bool first = true;
+
+	assert(exfat->alloc_bitmap != NULL);
 
 	clu = le32_to_cpu(ed->stream_start_clu);
 	num_clus = DIV_ROUND_UP(le64_to_cpu(ed->stream_size), exfat->clus_size);
@@ -875,7 +884,6 @@ static int exfat_show_dentry_set_by_path(struct exfat *exfat, const char *path,
 
 		memset(&ed, 0, sizeof(ed));
 		ed.stream_start_clu = cpu_to_le32(inode->first_clus);
-		memset(exfat->alloc_bitmap, 0, EXFAT_BITMAP_SIZE(exfat->clus_count));
 
 		exfat_show_cluster_chain(exfat, &ed);
 	} else
@@ -941,7 +949,7 @@ int main(int argc, char *argv[])
 	if (ret < 0)
 		goto out;
 
-	exfat = exfat_alloc_exfat(&bd, NULL, NULL);
+	exfat = exfat_alloc_exfat(&bd, NULL, NULL, flags & DUMP_CLUSTER_CHAIN);
 	if (!exfat) {
 		ret = -ENOMEM;
 		goto out;

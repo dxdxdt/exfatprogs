@@ -429,4 +429,8 @@ extern unsigned int print_level;
 			(guid)[8], (guid)[9], (guid)[10], (guid)[11],	\
 			(guid)[12], (guid)[13], (guid)[14], (guid)[15])
 
+/* Influential env vars */
+#define EXFAT_ENV_SCRATCH_AMAP		"EXFAT_SCRATCH_AMAP"
+#define EXFAT_ENV_SCRATCH_AMAP_DEFAULT	"/var/tmp"
+
 #endif /* !_LIBEXFAT_H */

@@ -118,7 +118,7 @@ static int create_exfat2img(struct exfat2img *ei, const char *out_path)
 {
 	int err;
 
-	ei->exfat = exfat_alloc_exfat(&ei->bdev, NULL, NULL);
+	ei->exfat = exfat_alloc_exfat(&ei->bdev, NULL, NULL, ei->is_stdout);
 	if (!ei->exfat)
 		return -ENOMEM;
 
@@ -382,13 +382,9 @@ static int read_bitmap(struct exfat2img *ei, struct exfat_de_iter *iter)
 	}
 
 	exfat->disk_bitmap_clus = le32_to_cpu(dentry->bitmap_start_clu);
-	exfat->disk_bitmap_size = DIV_ROUND_UP(exfat->clus_count, 8);
 
-	return dump_clusters(ei,
-			     exfat->disk_bitmap_clus,
-			     exfat->disk_bitmap_clus +
-			     DIV_ROUND_UP(exfat->disk_bitmap_size,
-					  exfat->clus_size));
+	return dump_clusters(ei, exfat->disk_bitmap_clus, exfat->disk_bitmap_clus +
+			     DIV_ROUND_UP(exfat->bm_size, exfat->clus_size));
 }
 
 static int read_upcase_table(struct exfat2img *ei,

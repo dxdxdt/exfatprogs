@@ -110,20 +110,17 @@ static int exfat_rw_bitmap(struct exfat *exfat, bool read)
 
 	/* Record bitmap cluster and size */
 	exfat->disk_bitmap_clus = le32_to_cpu(dentry->bitmap_start_clu);
-	exfat->disk_bitmap_size = DIV_ROUND_UP(exfat->clus_count, 8);
 
 	free(filter.out.dentry_set);
 
 	/* Perform read or write operation */
 	if (read) {
-		rw = exfat_read_full(exfat->blk_dev->dev_fd, exfat->alloc_bitmap,
-					exfat->disk_bitmap_size,
+		rw = exfat_read_full(exfat->blk_dev->dev_fd, exfat->alloc_bitmap, exfat->bm_len,
 					exfat_c2o(exfat, exfat->disk_bitmap_clus));
 		if (!rw)
 			return -EIO;
 	} else {
-		rw = exfat_write_full(exfat->blk_dev->dev_fd, exfat->alloc_bitmap,
-					exfat->disk_bitmap_size,
+		rw = exfat_write_full(exfat->blk_dev->dev_fd, exfat->alloc_bitmap, exfat->bm_len,
 					exfat_c2o(exfat, exfat->disk_bitmap_clus));
 		if (!rw)
 			return -EIO;
@@ -1038,7 +1035,7 @@ int main(int argc, char *argv[])
 
 	/* Step 2: Initialize exfat structure */
 	memset(&defrag, 0, sizeof(defrag));
-	defrag.exfat = exfat_alloc_exfat(&bd, NULL, NULL);
+	defrag.exfat = exfat_alloc_exfat(&bd, NULL, NULL, true);
 	if (defrag.exfat == NULL) {
 		exfat_err("fail in exfat_alloc_exfat\n");
 		ret = 1;
