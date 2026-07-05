@@ -30,6 +30,7 @@
 #include "version.h"
 #include "exfat_fs.h"
 #include "exfat_dir.h"
+#include "env.h"
 
 unsigned int print_level  = EXFAT_INFO;
 static int fd_devzero = -1;
@@ -1970,7 +1971,7 @@ void exfat_put_bootstrap_code(const char *user_msg, void *dst, unsigned int code
 
 bool exfat_isatty_stdio(void)
 {
-	const char *env = getenv("EXFAT_TTY_OVERRIDE");
+	const char *env = getenv(EXFAT_ENV_TTY_OVERRIDE);
 
 	if (env != NULL) {
 		int v = -1;
