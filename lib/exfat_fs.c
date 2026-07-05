@@ -142,6 +142,11 @@ void exfat_free_exfat(struct exfat *exfat)
 	free(exfat);
 }
 
+static bool bitmap_mmap_allowed(void)
+{
+	return exfat_getenv_mmap() & EXFAT_ENV_MMAP_BITMAP;
+}
+
 #if defined(_POSIX_MAPPED_FILES) && defined(O_TMPFILE)
 static void unmap_amap(struct exfat *exfat)
 {
@@ -167,13 +172,21 @@ static bool open_tmp_amap(struct exfat *exfat)
 {
 	bool ret = false;
 #if defined(_POSIX_MAPPED_FILES) && defined(O_TMPFILE)
-	const char *path = getenv(EXFAT_ENV_SCRATCH_AMAP);
+	const char *path;
 	int fd;
 
+	if (!bitmap_mmap_allowed()) {
+		errno = EPERM;
+		return false;
+	}
+
+	path = getenv(EXFAT_ENV_SCRATCH_AMAP);
 	if (path == NULL)
 		path = EXFAT_ENV_SCRATCH_AMAP_DEFAULT;
-	else if (path[0] == 0)
+	else if (path[0] == 0) {
+		errno = EPERM;
 		return false;
+	}
 
 	fd = open(path, O_TMPFILE | O_RDWR, 0600);
 	if (fd < 0)
@@ -356,9 +369,9 @@ bool exfat_load_disk_bitmap(struct exfat *exfat, const off_t loc, const bool rw)
 	void *m;
 #ifdef _POSIX_MAPPED_FILES
 	const off_t req_size = loc + exfat->bm_size;
-	const int prot = rw ? PROT_READ | PROT_WRITE : PROT_READ;
 
-	if (req_size > 0 && exfat->blk_dev->size >= req_size) {
+	if (bitmap_mmap_allowed() && req_size > 0 && exfat->blk_dev->size >= req_size) {
+		const int prot = rw ? PROT_READ | PROT_WRITE : PROT_READ;
 		const off_t pa_ofs = loc & ~((off_t)exfat->pagesize - 1);
 		const size_t odelta = (size_t)(loc - pa_ofs);
 		const size_t msize = exfat->bm_size + odelta;
