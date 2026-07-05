@@ -24,6 +24,7 @@
 
 #include "exfat_fs.h"
 #include "exfat_dir.h"
+#include "env.h"
 
 struct exfat_inode *exfat_alloc_inode(__u16 attr)
 {
