@@ -11,6 +11,7 @@
 #include <string.h>
 #include <time.h>
 #include <inttypes.h>
+#include <assert.h>
 
 #include "exfat_ondisk.h"
 #include "libexfat.h"
@@ -776,6 +777,8 @@ int exfat_update_file_dentry_set(struct exfat *exfat,
 static int __find_free_cluster(struct exfat *exfat, clus_t *new_clu,
 		clus_t start, clus_t end)
 {
+	assert(exfat->alloc_bitmap != NULL);
+
 	while (start < end) {
 		if (exfat_bitmap_find_zero(exfat, exfat->alloc_bitmap,
 					   start, new_clu))
@@ -938,7 +941,7 @@ int exfat_alloc_cluster(struct exfat *exfat, struct exfat_inode *inode,
 	err = find_free_cluster(exfat, exfat->start_clu, new_clu);
 	if (err) {
 		exfat->start_clu = EXFAT_FIRST_CLUSTER;
-		exfat_err("failed to find an free cluster\n");
+		exfat_err("failed to find a free cluster\n");
 		return -ENOSPC;
 	}
 	exfat->start_clu = *new_clu;

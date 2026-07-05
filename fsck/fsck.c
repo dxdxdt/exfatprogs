@@ -13,7 +13,6 @@
 #include <errno.h>
 #include <locale.h>
 #include <assert.h>
-#include <fcntl.h>
 
 #include "exfat_ondisk.h"
 #include "libexfat.h"
@@ -995,7 +994,7 @@ static int read_bitmap(struct exfat *exfat)
 		.in.param	= NULL,
 	};
 	struct exfat_dentry *dentry;
-	uint64_t map_size, need_map_size;
+	uint64_t map_size;
 	int retval;
 
 	retval = exfat_lookup_dentry_set(exfat, exfat->root, &filter);
@@ -1009,11 +1008,10 @@ static int read_bitmap(struct exfat *exfat)
 
 	/* Validate on-disk bitmap size and required size */
 	map_size = le64_to_cpu(dentry->bitmap_size);
-	need_map_size = DIV_ROUND_UP(exfat->clus_count, 8);
-	if (map_size != need_map_size &&
+	if (map_size != exfat->bm_len &&
 		exfat_repair_ask(&exfat_fsck, ER_DE_BITMAP,
 				"ERROR: invalid bitmap size. %lld", map_size)) {
-		dentry->bitmap_size = cpu_to_le64(need_map_size);
+		dentry->bitmap_size = cpu_to_le64(exfat->bm_len);
 		if (!exfat_write_full(exfat->blk_dev->dev_fd, dentry, DENTRY_SIZE,
 				      filter.out.dev_offset)) {
 			exfat_err("failed to write bitmap dentry\n");
@@ -1021,8 +1019,7 @@ static int read_bitmap(struct exfat *exfat)
 		}
 	}
 
-	if (le64_to_cpu(dentry->bitmap_size) <
-			DIV_ROUND_UP(exfat->clus_count, 8)) {
+	if (le64_to_cpu(dentry->bitmap_size) < exfat->bm_len) {
 		exfat_err("invalid size of allocation bitmap. 0x%" PRIx64 "\n",
 				le64_to_cpu(dentry->bitmap_size));
 		retval = -EINVAL;
@@ -1036,16 +1033,12 @@ static int read_bitmap(struct exfat *exfat)
 	}
 
 	exfat->disk_bitmap_clus = le32_to_cpu(dentry->bitmap_start_clu);
-	exfat->disk_bitmap_size = DIV_ROUND_UP(exfat->clus_count, 8);
 
-	exfat_bitmap_set_range(exfat, exfat->alloc_bitmap,
-			       le32_to_cpu(dentry->bitmap_start_clu),
-			       DIV_ROUND_UP(exfat->disk_bitmap_size,
-					    exfat->clus_size));
-	if (!exfat_read_full(exfat->blk_dev->dev_fd, exfat->disk_bitmap,
-			exfat->disk_bitmap_size,
-			exfat_c2o(exfat, exfat->disk_bitmap_clus)))
-		retval = -EIO;
+	exfat_bitmap_set_range(exfat, exfat->alloc_bitmap, le32_to_cpu(dentry->bitmap_start_clu),
+			       (unsigned int)DIV_ROUND_UP(exfat->bm_len, exfat->clus_size));
+	if (!exfat_load_disk_bitmap(exfat, exfat_c2o(exfat, exfat->disk_bitmap_clus),
+				    exfat_fsck.options & FSCK_OPTS_REPAIR_WRITE))
+		retval = -errno;
 out:
 	free(filter.out.dentry_set);
 	return retval;
@@ -1459,39 +1452,60 @@ err:
 static int write_bitmap(struct exfat_fsck *fsck)
 {
 	struct exfat *exfat = fsck->exfat;
-	bitmap_t *disk_b, *alloc_b, *ohead_b;
-	off_t dev_offset;
-	unsigned int i, bitmap_bytes, byte_offset, write_bytes;
+	bitmap_t *disk_b = (bitmap_t *)exfat->disk_bitmap;
+	const bitmap_t *alloc_b = (bitmap_t *)exfat->alloc_bitmap;
+	const size_t bm_cnt = exfat->bm_size / sizeof(bitmap_t);
+	size_t bm_step;
+	size_t bm_step_bytes;
+	size_t psz = (size_t)exfat->pagesize;
 
-	dev_offset = exfat_c2o(exfat, exfat->disk_bitmap_clus);
-	bitmap_bytes = EXFAT_BITMAP_SIZE(le32_to_cpu(exfat->bs->bsx.clu_count));
+	/*
+	 * Process one cluster or one page at a time(whichever is larger)
+	 * to make life easier for the kernel and devices with write
+	 * amplification like SMR HDD and NAND flash.
+	 *
+	 * NOTE: if the page size is not power of two, this whole thing will
+	 * break. Hopefully, no one is crazy enough to design such arch.
+	 */
+	assert(psz % sizeof(bitmap_t) == 0);
+	psz /= sizeof(bitmap_t);
 
-	disk_b = (bitmap_t *)exfat->disk_bitmap;
-	alloc_b = (bitmap_t *)exfat->alloc_bitmap;
-	ohead_b = (bitmap_t *)exfat->ohead_bitmap;
+	bm_step = exfat->clus_size / sizeof(bitmap_t);
+	bm_step = MAX(bm_step, psz);
+	bm_step_bytes = bm_step * sizeof(bitmap_t);
+	assert(bm_step > 0);
 
-	for (i = 0; i < bitmap_bytes / sizeof(bitmap_t); i++)
-		ohead_b[i] = alloc_b[i] | disk_b[i];
+	for (size_t i = 0; i < bm_cnt; i += bm_step) {
+		bitmap_t v;
+		bool dirty = false;
+		size_t cnt = i + bm_step;
 
-	i = 0;
-	while (i < bitmap_bytes / sizeof(bitmap_t)) {
-		if (ohead_b[i] == disk_b[i]) {
-			i++;
-			continue;
+		cnt = MIN(cnt, bm_cnt);
+		for (size_t j = i; j < cnt; j += 1) {
+			v = alloc_b[j] | disk_b[j];
+			if (v != disk_b[j]) {
+				dirty = true;
+				disk_b[j] = v; /* BAM! Page fault! */
+			}
 		}
 
-		byte_offset = ((i * sizeof(bitmap_t)) / 512) * 512;
-		write_bytes = MIN(512, bitmap_bytes - byte_offset);
+		if (dirty) {
+			const size_t ofs = i * sizeof(bitmap_t);
+			const size_t rem = exfat->bm_len - ofs;
+			const size_t len = MIN(bm_step_bytes, rem);
 
-		if (!exfat_write_full(exfat->blk_dev->dev_fd,
-				(char *)ohead_b + byte_offset, write_bytes,
-				dev_offset + byte_offset))
-			return -EIO;
+			exfat_debug("dirty bitmap range: %zu:%zu\n", ofs, len);
 
-		i = (byte_offset + write_bytes) / sizeof(bitmap_t);
+			if (exfat->invalidate_disk_bitmap != NULL &&
+					!exfat->invalidate_disk_bitmap(exfat, ofs, len))
+				return -errno;
+		}
 	}
-	return 0;
 
+	if (exfat->sync_disk_bitmap != NULL && !exfat->sync_disk_bitmap(exfat))
+		return -errno;
+
+	return 0;
 }
 
 /*
@@ -1620,19 +1634,94 @@ static int read_lostfound(struct exfat *exfat, struct exfat_inode **lostfound)
 	return 0;
 }
 
-/* Create temporary files under LOST+FOUND and assign orphan
- * chains of clusters to these files.
+static struct exfat_inode *make_lostfound(struct exfat *exfat, int *err,
+		struct exfat_dentry_loc *loc, struct exfat_dentry **dset,
+		struct exfat_lookup_filter *lf, int *dcount, char *name)
+{
+	struct exfat_inode *ret = NULL;
+
+	*err = exfat_create_file(exfat, exfat->root, "LOST+FOUND", ATTR_SUBDIR);
+	if (*err) {
+		exfat_err("failed to create LOST+FOUND directory\n");
+		return NULL;
+	}
+
+	if (fsync(exfat->blk_dev->dev_fd) != 0) {
+		exfat_err("failed to sync()\n");
+		*err = -EIO;
+		return NULL;
+	}
+
+	*err = read_lostfound(exfat, &ret);
+	if (*err) {
+		exfat_err("failed to find LOST+FOUND\n");
+		return NULL;
+	}
+
+	/* get the last empty region of LOST+FOUND */
+	*err = exfat_lookup_dentry_set(exfat, ret, lf);
+	if (*err && *err != EOF) {
+		exfat_err("failed to find the last empty slot in LOST+FOUND\n");
+		return NULL;
+	}
+
+	loc->parent = ret;
+	loc->file_offset = lf->out.file_offset;
+	loc->dev_offset = lf->out.dev_offset;
+
+	/* build a template dentry set */
+	*err = exfat_build_file_dentry_set(exfat, name, 0, dset, dcount);
+	if (*err) {
+		exfat_err("failed to create a temporary file in LOST+FOUNDn");
+		return NULL;
+	}
+	(*dset)[1].dentry.stream.flags |= EXFAT_SF_CONTIGUOUS;
+
+	return ret;
+}
+
+static int make_orphan_file(struct exfat *exfat, struct exfat_inode **lostfound,
+		struct exfat_dentry_loc *loc, struct exfat_dentry **dset,
+		struct exfat_lookup_filter *lf, int *dcount, clus_t s_clu, clus_t e_clu)
+{
+	int ret;
+	char name[] = "FILE0000000.CHK";
+
+	exfat_err("ORPHAN: [%u, %u): ", s_clu, e_clu);
+
+	if (*lostfound == NULL) {
+		*lostfound = make_lostfound(exfat, &ret, loc, dset, lf, dcount, name);
+		if (*lostfound == NULL)
+			return ret;
+	}
+
+	snprintf(name, sizeof(name), "FILE%07d.CHK", (unsigned int)(loc->file_offset >> 5));
+
+	ret = exfat_update_file_dentry_set(exfat, *dset, *dcount, name, s_clu, e_clu - s_clu);
+	if (ret)
+		return ret;
+	ret = exfat_add_dentry_set(exfat, loc, *dset, *dcount, true);
+	if (ret)
+		return ret;
+
+	exfat_err("%s\n", name);
+
+	return 0;
+}
+
+/*
+ * Scan bitmaps for clusters which are not marked as free but not used in any
+ * files. Create a directory named "LOST+FOUND" and create temporary files in it
+ * to assign chains of orphan clusters to the files.
  */
 static int rescue_orphan_clusters(struct exfat_fsck *fsck)
 {
 	struct exfat *exfat = fsck->exfat;
-	struct exfat_inode *lostfound;
-	bitmap_t *disk_b, *alloc_b, *ohead_b;
-	struct exfat_dentry *dset;
-	clus_t clu_count, clu, s_clu, e_clu;
-	int err, dcount;
-	unsigned int i;
-	char name[] = "FILE0000000.CHK";
+	const clus_t clu_end = exfat->clus_count + EXFAT_FIRST_CLUSTER;
+	struct exfat_inode *lostfound = NULL;
+	struct exfat_dentry *dset = NULL;
+	clus_t s_clu = EXFAT_EOF_CLUSTER;
+	int err = 0, dcount;
 	struct exfat_dentry_loc loc;
 	struct exfat_lookup_filter lf = {
 		.in.type = EXFAT_INVAL,
@@ -1640,84 +1729,32 @@ static int rescue_orphan_clusters(struct exfat_fsck *fsck)
 		.in.filter = NULL,
 	};
 
-	clu_count = le32_to_cpu(exfat->bs->bsx.clu_count);
+	for (clus_t clu = EXFAT_FIRST_CLUSTER; clu < clu_end; clu++) {
+		const bool v =
+			exfat_bitmap_get(exfat->disk_bitmap, clu) &&
+			!exfat_bitmap_get(exfat->alloc_bitmap, clu);
 
-	/* find clusters which are not marked as free, but not allocated to
-	 * any files.
-	 */
-	disk_b = (bitmap_t *)exfat->disk_bitmap;
-	alloc_b = (bitmap_t *)exfat->alloc_bitmap;
-	ohead_b = (bitmap_t *)exfat->ohead_bitmap;
-	for (i = 0; i < EXFAT_BITMAP_SIZE(clu_count) / sizeof(bitmap_t); i++)
-		ohead_b[i] = disk_b[i] & ~alloc_b[i];
-
-	/* no orphan clusters */
-	if (exfat_bitmap_find_one(exfat, exfat->ohead_bitmap,
-				EXFAT_FIRST_CLUSTER, &s_clu))
-		return 0;
-
-	err = exfat_create_file(exfat_fsck.exfat,
-				exfat_fsck.exfat->root,
-				"LOST+FOUND",
-				ATTR_SUBDIR);
-	if (err) {
-		exfat_err("failed to create LOST+FOUND directory\n");
-		return err;
+		if (v) {
+			if (s_clu == EXFAT_EOF_CLUSTER)
+				s_clu = clu;
+		} else {
+			if (s_clu != EXFAT_EOF_CLUSTER) {
+				err = make_orphan_file(exfat, &lostfound, &loc, &dset,
+						       &lf, &dcount, s_clu, clu);
+				if (err)
+					goto out;
+				s_clu = EXFAT_EOF_CLUSTER;
+			}
+		}
+	}
+	if (s_clu != EXFAT_EOF_CLUSTER) {
+		/* Edge case: a run that stretches to the last cluster is not rescued */
+		err = make_orphan_file(exfat, &lostfound, &loc, &dset,
+				       &lf, &dcount, s_clu, clu_end);
 	}
 
-	if (fsync(exfat_fsck.exfat->blk_dev->dev_fd) != 0) {
-		exfat_err("failed to sync()\n");
-		return -EIO;
-	}
-
-	err = read_lostfound(exfat, &lostfound);
-	if (err) {
-		exfat_err("failed to find LOST+FOUND\n");
-		return err;
-	}
-
-	/* get the last empty region of LOST+FOUND */
-	err = exfat_lookup_dentry_set(exfat, lostfound, &lf);
-	if (err && err != EOF) {
-		exfat_err("failed to find the last empty slot in LOST+FOUND\n");
-		goto out;
-	}
-
-	loc.parent = lostfound;
-	loc.file_offset = lf.out.file_offset;
-	loc.dev_offset = lf.out.dev_offset;
-
-	/* build a template dentry set */
-	err = exfat_build_file_dentry_set(exfat, name, 0, &dset, &dcount);
-	if (err) {
-		exfat_err("failed to create a temporary file in LOST+FOUNDn");
-		goto out;
-	}
-	dset[1].dentry.stream.flags |= EXFAT_SF_CONTIGUOUS;
-
-	/* create temporary files and allocate contiguous orphan clusters
-	 * to each file.
-	 */
-	for (clu = EXFAT_FIRST_CLUSTER; clu < clu_count + EXFAT_FIRST_CLUSTER &&
-	     exfat_bitmap_find_one(exfat, exfat->ohead_bitmap, clu, &s_clu) == 0;) {
-		if (exfat_bitmap_find_zero(exfat, exfat->ohead_bitmap, s_clu, &e_clu))
-			e_clu = clu_count + EXFAT_FIRST_CLUSTER;
-		clu = e_clu;
-
-		snprintf(name, sizeof(name), "FILE%07d.CHK",
-			 (unsigned int)(loc.file_offset >> 5));
-		err = exfat_update_file_dentry_set(exfat, dset, dcount,
-						   name, s_clu, e_clu - s_clu);
-		if (err)
-			continue;
-		err = exfat_add_dentry_set(exfat, &loc, dset, dcount, true);
-		if (err)
-			continue;
-	}
-
-	free(dset);
-	err = 0;
 out:
+	free(dset);
 	exfat_free_inode(lostfound);
 	return err;
 }
@@ -2041,7 +2078,7 @@ int main(int argc, char * const argv[])
 		goto err;
 	}
 
-	exfat_fsck.exfat = exfat_alloc_exfat(&bd, bs, root);
+	exfat_fsck.exfat = exfat_alloc_exfat(&bd, bs, root, true);
 	if (!exfat_fsck.exfat) {
 		ret = -ENOMEM;
 		goto err;
@@ -2068,8 +2105,7 @@ int main(int argc, char * const argv[])
 
 	if (exfat_fsck.options & FSCK_OPTS_PROGRESS_BAR) {
 		used_clus_count = exfat_count_used_clusters(exfat_fsck.exfat->disk_bitmap,
-				(size_t)exfat_fsck.exfat->disk_bitmap_size,
-				exfat_fsck.exfat->clus_count);
+				exfat_fsck.exfat->bm_len, exfat_fsck.exfat->clus_count);
 		progress_init(&exfat_fsck.progress_bar, 0, used_clus_count, 0);
 	}
 

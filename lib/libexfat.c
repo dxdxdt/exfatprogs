@@ -1664,10 +1664,11 @@ int exfat_root_clus_count(struct exfat *exfat)
 
 	clus = node->first_clus;
 	do {
-		if (exfat_bitmap_get(exfat->alloc_bitmap, clus))
-			return -EINVAL;
-
-		exfat_bitmap_set(exfat->alloc_bitmap, clus);
+		if (exfat->alloc_bitmap != NULL) {
+			if (exfat_bitmap_get(exfat->alloc_bitmap, clus))
+				return -EINVAL;
+			exfat_bitmap_set(exfat->alloc_bitmap, clus);
+		}
 
 		if (exfat_get_inode_next_clus(exfat, node, clus, &next)) {
 			exfat_err("ERROR: failed to read the fat entry of root");

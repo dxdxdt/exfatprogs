@@ -109,7 +109,7 @@ int main(int argc, char *argv[])
 	} else {
 		struct exfat *exfat;
 
-		exfat = exfat_alloc_exfat(&bd, NULL, NULL);
+		exfat = exfat_alloc_exfat(&bd, NULL, NULL, false);
 		if (!exfat) {
 			ret = -ENOMEM;
 			goto out;
