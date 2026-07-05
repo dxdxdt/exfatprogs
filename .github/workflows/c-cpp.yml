@@ -17,6 +17,7 @@ on:
     branches:
       - master
       - exfat-next
+  workflow_dispatch:
 
 env:
   TEST_PART_TYPES: mbr gpt
