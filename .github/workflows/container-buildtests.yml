@@ -17,6 +17,7 @@ on:
     branches:
       - master
       - exfat-next
+  workflow_dispatch:
 
 jobs:
   container-build-alpine:
