@@ -401,6 +401,14 @@ void exfat_put_bootstrap_code(const char *user_msg, void *dst, unsigned int code
 bool exfat_isatty_stdio(void);
 
 /*
+ * Do getenv(EXFAT_ENV_MMAP) and parse the string.
+ *
+ * Returns a positive integer value if the env var is set to a valid string.
+ * -1 otherwise.
+ */
+int exfat_getenv_mmap(void);
+
+/*
  * Exfat Print
  */
 

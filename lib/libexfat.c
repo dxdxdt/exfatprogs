@@ -1233,12 +1233,15 @@ out:
 
 int exfat_open_fd_devzero(void)
 {
+	if (fd_devzero >= 0)
+		return 0;
 #ifdef _POSIX_MAPPED_FILES
-	if (fd_devzero < 0) {
+	if (exfat_getenv_mmap() & EXFAT_ENV_MMAP_MEMDEV) {
 		fd_devzero = open("/dev/zero", O_RDONLY);
 		if (fd_devzero < 0)
 			return -errno;
-	}
+	} else
+		return -EPERM;
 #else
 	return -ENOSYS;
 #endif
@@ -1981,4 +1984,17 @@ bool exfat_isatty_stdio(void)
 	}
 
 	return isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+}
+
+int exfat_getenv_mmap(void)
+{
+	const char *envvar = getenv(EXFAT_ENV_MMAP);
+	int ret = -1;
+
+	if (envvar != NULL)
+		sscanf(envvar, "%d", &ret);
+	if (ret < 0)
+		ret = EXFAT_ENV_MMAP_DEFAULT;
+
+	return ret;
 }
