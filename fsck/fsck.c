@@ -2151,10 +2151,9 @@ err:
 	else
 		exit_code = FSCK_EXIT_NO_ERRORS;
 
-	if (exfat_fsck.buffer_desc)
+	if (exfat_fsck.exfat != NULL && exfat_fsck.buffer_desc != NULL)
 		exfat_free_buffer(exfat_fsck.exfat, exfat_fsck.buffer_desc);
-	if (exfat_fsck.exfat)
-		exfat_free_exfat(exfat_fsck.exfat);
+	exfat_free_exfat(exfat_fsck.exfat);
 
 	exfat_deinit_blk_dev_info(&bd);
 	deinit_fsck_user_input(&ui);
