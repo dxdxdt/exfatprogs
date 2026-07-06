@@ -18,6 +18,14 @@ on:
       - master
       - exfat-next
   workflow_dispatch:
+    inputs:
+      EXFAT_MMAP:
+        type: string
+        required: false
+      EXFAT_SCRATCH_AMAP:
+        type: string
+        required: false
+        default: /var/tmp
 
 env:
   TEST_PART_TYPES: mbr gpt
@@ -57,6 +65,9 @@ jobs:
       fail-fast: false
       matrix:
         cc: [clang, gcc]
+    env:
+      EXFAT_MMAP: ${{ inputs.EXFAT_MMAP }}
+      EXFAT_SCRATCH_AMAP: ${{ inputs.EXFAT_SCRATCH_AMAP }}
     steps:
     - uses: actions/checkout@v6
     - name: Install packages
@@ -173,6 +184,9 @@ jobs:
             gcc:  gcc-i686-linux-gnu
             run:  qemu-i386
             name: i686
+    env:
+      EXFAT_MMAP: ${{ inputs.EXFAT_MMAP }}
+      EXFAT_SCRATCH_AMAP: ${{ inputs.EXFAT_SCRATCH_AMAP }}
     steps:
     - name: Install packages
       run: |
