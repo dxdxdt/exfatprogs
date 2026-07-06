@@ -188,12 +188,7 @@ static int exfat_show_fs_info(struct exfat *exfat)
 		dump_field("Bitmap start cluster", "%x", bitmap_clu);
 		dump_field("Bitmap size", "%llu", bitmap_len);
 
-		/*
-		 * FIXME shouldn't it be `bitmap_len < exfat->bm_len` ???
-		 * The spec says nothing about this. fsck expects the exact size
-		 * (DIV_ROUND_UP(exfat->clus_count, 8)).
-		 */
-		if (bitmap_len > exfat->bm_size) {
+		if (bitmap_len != exfat->bm_len) {
 			exfat_err("Invalid bitmap size: %llu\n", bitmap_len);
 			return -EINVAL;
 		}
