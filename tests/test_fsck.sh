@@ -5,7 +5,7 @@ NEED_LOOPDEV=$2
 IMAGE_FILE=exfat.img
 FSCK_PROG=${FSCK1:-"fsck.exfat"}
 FSCK_PROG_2=${FSCK2:-"fsck.exfat"}
-FSCK_OPTS="-y -s"
+FSCK_OPTS="-y -s $FSCK_OPTS_EXTRA"
 PASS_COUNT=0
 
 cleanup() {
