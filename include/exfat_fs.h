@@ -7,6 +7,7 @@
 #ifndef _EXFAT_FS_H_
 #define _EXFAT_FS_H_
 
+#include <sys/types.h>
 #include "list.h"
 
 struct exfat_dentry;
@@ -105,6 +106,19 @@ struct exfat {
 	void (*free_disk_bitmap)(struct exfat *exfat);
 	/* Callback to free up `alloc_bitmap`(free() or munmap()) */
 	void (*free_alloc_bitmap)(struct exfat *exfat);
+
+	/*
+	 * The pid of the sentry process
+	 *
+	 * See SIGBUS Sentry Facilities for more.
+	 */
+	pid_t sentry_pid;
+	/*
+	 * The write end of the sentry pipe.
+	 *
+	 * See SIGBUS Sentry Facilities for more.
+	 */
+	int sentry_pipe;
 };
 
 struct exfat_dentry_loc {

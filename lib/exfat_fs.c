@@ -15,6 +15,8 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <sys/wait.h>
 #ifdef _POSIX_MAPPED_FILES
 #include <sys/mman.h>
 #endif
@@ -120,6 +122,16 @@ void exfat_free_exfat(struct exfat *exfat)
 	free(exfat->bs);
 	exfat->bs = NULL;
 
+	if (exfat->sentry_pid > 0) {
+		struct sigaction sa = { .sa_handler = SIG_DFL, };
+
+		sigaction(SIGBUS, &sa, NULL);
+		close(exfat->sentry_pipe);
+		waitpid(exfat->sentry_pid, NULL, 0);
+		exfat->sentry_pipe = -1;
+		exfat->sentry_pid = -1;
+	}
+
 	if (exfat->free_disk_bitmap != NULL) {
 		exfat->free_disk_bitmap(exfat);
 		exfat->free_disk_bitmap = NULL;
@@ -146,6 +158,178 @@ static bool bitmap_mmap_allowed(void)
 {
 	return exfat_getenv_mmap() & EXFAT_ENV_MMAP_BITMAP;
 }
+
+#ifdef _POSIX_MAPPED_FILES
+/*
+ * SIGBUS Sentry Facilities
+ *
+ * Since printf() cannot be used in a signal handler, if choosing to mmap() to
+ * access the data on disks, spawn a child process("the sentry"), whose sole
+ * purpose is to print error messages on behalf of the parent process in case of
+ * SIGBUS caused by access to exfat->alloc_bitmap or exfat->disk_bitmap.
+ *
+ * Upon receiving SIGBUS in the parent, the information parsed off siginfo_t is
+ * merely passed to the child process where it's printed. We don't write() to
+ * STDERR_FILENO directly from the signal handler in the main process because
+ * the locale might be other than "C" or UTF-8!
+ *
+ * Most other utils don't bother handling SIGBUS. We go through all this trouble
+ * because this is filesystem utils - we have our duty of reporting faulty
+ * hardware.
+ */
+
+enum sentry_alert_type {
+	SENTRY_ALERT_TYPE_NONE,
+	SENTRY_ALERT_TYPE_AMAP,
+	SENTRY_ALERT_TYPE_DISKMAP,
+};
+
+struct sentry_alert {
+	off_t devofs;
+	enum sentry_alert_type type;
+};
+
+/* Thankfully, gcc doesn't over optimise this with -O2. */
+/* volatile */
+static struct exfat *exfat_sentry; /* ¯\_(ツ)_/¯ */
+
+static void handle_sigbus(int signum, siginfo_t *info, void *uctx)
+{
+	int saved_errno;
+	uintptr_t a, b, c;
+	struct sentry_alert sa = { 0, };
+
+	assert(signum == SIGBUS);
+	assert(exfat_sentry != NULL);
+	assert(exfat_sentry->sentry_pid > 0);
+	assert(exfat_sentry->sentry_pipe >= 0);
+	b = (uintptr_t)info->si_addr;
+
+	a = (uintptr_t)exfat_sentry->alloc_bitmap;
+	c = a + exfat_sentry->bm_size;
+	if (a <= b && b < c) {
+		sa.type = SENTRY_ALERT_TYPE_AMAP;
+		goto handled;
+	}
+
+	a = (uintptr_t)exfat_sentry->disk_bitmap_m;
+	c = a + exfat_sentry->bm_size;
+	if (a <= b && b < c) {
+		sa.type = SENTRY_ALERT_TYPE_DISKMAP;
+		sa.devofs = exfat_sentry->disk_bitmap_devofs;
+		goto handled;
+	}
+
+	/* Not our concern. */
+	/* Since SA_RESETHAND is set, the subsequent SIGBUS will trigger the default action. */
+	return;
+
+handled:
+	saved_errno = errno;
+	/*
+	 * This is only an approximation: the exact block number is probably not
+	 * known because the kernel would have encountered -EIO whilst faulting
+	 * the entire page. At least in Linux, info->si_addr always seems to be
+	 * aligned to the page boundary.
+	 */
+	sa.devofs += (off_t)(b - a);
+
+	write(exfat_sentry->sentry_pipe, &sa, sizeof(sa));
+	close(exfat_sentry->sentry_pipe);
+	waitpid(exfat_sentry->sentry_pid, NULL, 0);
+
+	errno = saved_errno;
+}
+
+/* __attribute__((noreturn)) */
+static void sentry_process_main(int fd)
+{
+	struct sentry_alert sa;
+	const char *what, *blinker_start, *blinkder_end;
+	ssize_t rsize;
+
+	rsize = read(fd, &sa, sizeof(sa));
+	if (rsize == sizeof(sa)) {
+		switch (sa.type) {
+		case SENTRY_ALERT_TYPE_AMAP:
+			what = getenv(EXFAT_ENV_SCRATCH_AMAP);
+			break;
+		case SENTRY_ALERT_TYPE_DISKMAP:
+			what = "(target device)";
+			break;
+		default:
+			what = NULL;
+		}
+		assert(what != NULL);
+
+		if (isatty(STDERR_FILENO)) {
+			blinker_start = "\033[5m";
+			blinkder_end = "\033[0m";
+		} else {
+			blinker_start = "";
+			blinkder_end = "";
+		}
+
+		exfat_err("\n%s: SIGBUS(I/O error) triggered accessing offset 0x%llx\n",
+			what, (unsigned long long)sa.devofs);
+		exfat_err("!!! %sCrashing due to faulty hardware%s !!!\n"
+			  "Please check the kernel messages for errors.\n\n",
+			  blinker_start, blinkder_end);
+	} else
+		assert(rsize == 0);
+
+	exit(EXIT_SUCCESS);
+}
+
+static bool setup_sigbus_sentry(struct exfat *exfat)
+{
+	int fd[2];
+
+	if (exfat->sentry_pid > 0)
+		/* Already running. */
+		return true;
+
+	if (pipe(fd) < 0)
+		return false;
+
+	exfat_debug("fork()'ing... (parent pid: %d)\n", (int)getpid());
+	fflush(stdout);
+	fflush(stderr);
+	exfat->sentry_pid = fork();
+	if (exfat->sentry_pid < 0)
+		goto bail;
+	else if (exfat->sentry_pid == 0) {
+		close(fd[1]);
+		sentry_process_main(fd[0]);
+		/* unreachable */
+		abort();
+	} else {
+		struct sigaction sa = {
+			.sa_sigaction = handle_sigbus,
+			.sa_flags = SA_RESETHAND | SA_SIGINFO,
+		};
+		int err;
+
+		exfat_debug("sentry pid: %d\n", (int)exfat->sentry_pid);
+
+		close(fd[0]);
+		exfat->sentry_pipe = fd[1];
+		exfat_sentry = exfat;
+
+		err = sigaction(SIGBUS, &sa, NULL);
+		(void)err;
+		assert(err == 0);
+	}
+
+	return true;
+bail:
+	exfat_err("%s(): %s\n", __func__, strerror(errno));
+	close(fd[0]);
+	close(fd[1]);
+
+	return false;
+}
+#endif
 
 #if defined(_POSIX_MAPPED_FILES) && defined(O_TMPFILE)
 static void unmap_amap(struct exfat *exfat)
@@ -187,6 +371,9 @@ static bool open_tmp_amap(struct exfat *exfat)
 		errno = EPERM;
 		return false;
 	}
+
+	if (!setup_sigbus_sentry(exfat))
+		return false;
 
 	fd = open(path, O_TMPFILE | O_RDWR, 0600);
 	if (fd < 0)
@@ -263,6 +450,8 @@ struct exfat *exfat_alloc_exfat(struct exfat_blk_dev *blk_dev, struct pbr *bs,
 	exfat->bm_len = DIV_ROUND_UP(exfat->clus_count, 8);
 	exfat->root = root;
 	exfat->pagesize = sysconf(_SC_PAGE_SIZE);
+	exfat->sentry_pid = -1;
+	exfat->sentry_pipe = -1;
 
 	assert(exfat->clus_count > 0);
 	assert(exfat->pagesize > 0);
@@ -370,7 +559,8 @@ bool exfat_load_disk_bitmap(struct exfat *exfat, const off_t loc, const bool rw)
 #ifdef _POSIX_MAPPED_FILES
 	const off_t req_size = loc + exfat->bm_size;
 
-	if (bitmap_mmap_allowed() && req_size > 0 && exfat->blk_dev->size >= req_size) {
+	if (bitmap_mmap_allowed() && setup_sigbus_sentry(exfat) && req_size > 0 &&
+			exfat->blk_dev->size >= req_size) {
 		const int prot = rw ? PROT_READ | PROT_WRITE : PROT_READ;
 		const off_t pa_ofs = loc & ~((off_t)exfat->pagesize - 1);
 		const size_t odelta = (size_t)(loc - pa_ofs);
