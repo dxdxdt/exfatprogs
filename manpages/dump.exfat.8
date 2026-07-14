@@ -20,9 +20,6 @@ dump.exfat \- Show on-disk information of exfat filesystem
 .SH DESCRIPTION
 .B dump.exfat
 Print on-disk information from given device that formatted by exFAT filesystem.
-
-Note: For printing information of directory entries, the absence of "double-link" does not indicate the cluster is not doubly allocated if the scan is not started from the root directory with the recursive option.
-
 .PP
 .SH OPTIONS
 .TP
@@ -40,3 +37,14 @@ Scan and print information of directory entries from a given path recursively th
 .TP
 .BR \-c ", " \-\-cluster-chain
 Print the cluster chain while printing the directory entry information. Only works with -d/-s option.
+.SH ENVIRONMENT
+Following influential environment variables can be used to reduce memory
+footprint. See \fBexfatprogs-env\fP(7) for detail.
+.IP
+\fBEXFAT_MMAP\fR="3"
+.IP
+\fBEXFAT_SCRATCH_AMAP\fR="/var/tmp"
+.SH NOTES
+For printing information of directory entries, the absence of "double-link" does
+not indicate the cluster is not doubly allocated if the scan is not started from
+the root directory with the recursive option.

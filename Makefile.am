@@ -6,6 +6,7 @@ SUBDIRS = lib mkfs fsck tune label dump exfat2img upcase dosattr
 
 # manpages
 dist_man1_MANS =
+dist_man7_MANS = manpages/exfatprogs-env.7
 dist_man8_MANS =		\
 	manpages/fsck.exfat.8	\
 	manpages/tune.exfat.8	\

@@ -1,0 +1,45 @@
+.TH EXFATPROGS-ENV 7
+.SH NAME
+exfatprogs\-env \- exfatprogs influential environment variables
+.SH DESCRIPTION
+exfatprogs executables use environment variables to override the compiled\-in
+default settings.
+.TP
+.BR EXFAT_SCRATCH_AMAP
+Specifies the path to the temporary directory in which a temporary file(aka.
+"scratch file") for storing a copy of allocation bitmap is created by the
+programs \fBfsck.exfat\fP(8), \fBexfat2img\fP(8) and \fBdefrag.exfat\fP(8).
+Defaults to \fI/var/tmp\fP. Specifying an empty string disables this feature.
+
+To enable, the second least significant bit(\fI0x02\fP) of \fBEXFAT_MMAP\fP also
+needs to be set. For stability reasons, the temporary file is only created using
+\fBO_TMPFILE\fP flag(\fBopen\fP(2)) so it requires the support of the underlying
+filesystem. Failures are silently ignored and the programs fallback to the
+traditional file I/O.
+.TP
+.BR EXFAT_MMAP
+Specifies the \fBmmap\fP(2) usage control bits. Defaults to \fI"1"\fP.
+
+With large exFAT volumes, the allocation bitmaps can range up to 512MB. It may
+be unfeasible or even impossible to use exfatprogs utilities on large volumes on
+memory constraint systems. To overcome this limitation, allocation bitmap
+handling through file-backed shared mappings has been implemented to make it
+possible to use large exFAT volumes on systems constraint in memory but with
+MMU(memory management unit).
+
+The first least significant bit(\fI0x01\fP) controls the use of \fI/dev/zero\fP
+in \fBmkfs.exfat\fP(8). The second least significant bit(\fI0x02\fP) controls
+mapping of the allocation bitmaps in the target device and the scratch
+file(\fBEXFAT_SCRATCH_AMAP\fP). To enable both of these features to reduce
+memory use, specify \fI"3"\fP. Specifying \fI"0"\fP disables the use of file
+mapping entirely in all of the programs.
+
+As per mapping \fI/dev/zero\fP, the kernel may still refuse to create a mapping
+large enough to hold the allocation bitmap in \fBmkfs.exfat\fP(8). The
+\fIvm.overcommit\fP \fBsysctl\fP(8) can be used in conjunction as a workaround
+for the VSZ demand paging limitation. Refer to the relevant kernel documentation
+for detail.
+.TP
+.BR EXFAT_TTY_OVERRIDE
+Overrides \fBisatty\fP(3) return values for the standard input and output.
+Only intended for testing foreign filesystem detection of \fBmkfs.exfat\fP(8).

@@ -97,7 +97,15 @@ Repair the filesystem answering yes to all questions.
 .B \-b
 Try to repair the filesystem even if the exFAT filesystem is not found.
 
-.SH NOTE
+.SH ENVIRONMENT
+Following influential environment variables can be used to reduce memory
+footprint. See \fBexfatprogs-env\fP(7) for detail.
+.IP
+\fBEXFAT_MMAP\fR="3"
+.IP
+\fBEXFAT_SCRATCH_AMAP\fR="/var/tmp"
+
+.SH NOTES
 \fBmkfs.exfat\fR version \fI1.3.2\fR and older created exFAT volumes with no MBR
 partition entry even when it was required for use with Microsoft Windows
 systems, leading to some compatibility issues. \fB\-\-put-mbr\fR option may be
