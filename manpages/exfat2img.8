@@ -24,6 +24,14 @@ Because a dump image generated from stdout has a special format, when restoring 
 .B \-V
 Prints the version number and exits.
 
+.SH ENVIRONMENT
+Following influential environment variables can be used to reduce memory
+footprint. See \fBexfatprogs-env\fP(7) for detail.
+.IP
+\fBEXFAT_MMAP\fR="3"
+.IP
+\fBEXFAT_SCRATCH_AMAP\fR="/var/tmp"
+
 .SH EXAMPLES
 .PP
 Dump metadata into a sparse file.

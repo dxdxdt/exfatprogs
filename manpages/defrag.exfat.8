@@ -41,6 +41,14 @@ Display version information and exit.
 .B \-h, \-\-help
 Show usage information and exit.
 
+.SH ENVIRONMENT
+Following influential environment variables can be used to reduce memory
+footprint. See \fBexfatprogs-env\fP(7) for detail.
+.IP
+\fBEXFAT_MMAP\fR="3"
+.IP
+\fBEXFAT_SCRATCH_AMAP\fR="/var/tmp"
+
 .SH EXAMPLES
 .PP
 Defragment an unmounted exFAT device (with safety warning):
