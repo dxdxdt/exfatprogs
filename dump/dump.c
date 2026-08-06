@@ -957,6 +957,7 @@ int main(int argc, char *argv[])
 out:
 	exfat_deinit_blk_dev_info(&bd);
 	exfat_deinit_user_input(&ui);
+	exfat_print_iostat();
 
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

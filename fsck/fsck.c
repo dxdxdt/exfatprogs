@@ -378,7 +378,7 @@ static int exfat_mark_volume_dirty(struct exfat *exfat, bool dirty)
 		return -EIO;
 	}
 
-	if (fsync(exfat->blk_dev->dev_fd) != 0) {
+	if (exfat_fsync(exfat->blk_dev->dev_fd) != 0) {
 		exfat_err("failed to set VolumeDirty\n");
 		return -EIO;
 	}
@@ -497,7 +497,7 @@ static int restore_boot_region(struct exfat_blk_dev *bd, unsigned int sect_size)
 		}
 	}
 
-	if (fsync(bd->dev_fd)) {
+	if (exfat_fsync(bd->dev_fd)) {
 		ret = -EIO;
 		goto free_sector;
 	}
@@ -1733,7 +1733,7 @@ static int rescue_orphan_clusters(struct exfat_fsck *fsck)
 		return err;
 	}
 
-	if (fsync(exfat_fsck.exfat->blk_dev->dev_fd) != 0) {
+	if (exfat_fsync(exfat_fsck.exfat->blk_dev->dev_fd) != 0) {
 		exfat_err("failed to sync()\n");
 		return -EIO;
 	}
@@ -1883,7 +1883,7 @@ static int do_put_mbr(const struct exfat_blk_dev *bd, struct pbr *bs, const bool
 	/* dump main */
 	dump =	exfat_write_full(bd->dev_fd, sectors, ss, ss * BOOT_SEC_IDX) &&
 		exfat_write_full(bd->dev_fd, chks, ss, ss * CHECKSUM_SEC_IDX) &&
-		fsync(bd->dev_fd) == 0;
+		exfat_fsync(bd->dev_fd) == 0;
 	if (!dump)
 		goto err;
 
@@ -1891,7 +1891,7 @@ static int do_put_mbr(const struct exfat_blk_dev *bd, struct pbr *bs, const bool
 	idx = BACKUP_BOOT_SEC_IDX;
 	dump =	exfat_write_full(bd->dev_fd, sectors, ss, ss * (BOOT_SEC_IDX + idx)) &&
 		exfat_write_full(bd->dev_fd, chks, ss, ss * (CHECKSUM_SEC_IDX + idx)) &&
-		fsync(bd->dev_fd) == 0;
+		exfat_fsync(bd->dev_fd) == 0;
 	if (!dump)
 		goto err;
 
@@ -2167,7 +2167,7 @@ int main(int argc, char * const argv[])
 		}
 	}
 
-	if (ui.ei.writeable && fsync(bd.dev_fd)) {
+	if (ui.ei.writeable && exfat_fsync(bd.dev_fd)) {
 		exfat_err("failed to sync\n");
 		ret = -EIO;
 		goto out;
@@ -2198,6 +2198,7 @@ err:
 
 	exfat_deinit_blk_dev_info(&bd);
 	deinit_fsck_user_input(&ui);
+	exfat_print_iostat();
 
 	return exit_code;
 }

@@ -280,6 +280,7 @@ int exfat_write2(int fd, const void *buf, off_t *size, off_t *offset);
 bool exfat_write_full(int fd, const void *buf, size_t size, off_t offset);
 int exfat_write_zero(int fd, off_t size, off_t offset);
 int exfat_write_zero2(int fd, off_t size, off_t offset, size_t bs);
+int exfat_fsync(int fd);
 int exfat_discard_blocks(int fd, uint64_t start, uint64_t len);
 
 size_t exfat_utf16_len(const __le16 *str, size_t max_size);
@@ -411,6 +412,12 @@ void exfat_put_bootstrap_code(const char *user_msg, void *dst, unsigned int code
  * testing `mkfs.exfat -F` in xfstests and CI pipelines.
  */
 bool exfat_isatty_stdio(void);
+
+/*
+ * Print I/O statistics collected internally in libexfat to stderr if enabled
+ * with the environment variable EXFAT_PRINT_IOSTAT.
+ */
+void exfat_print_iostat(void);
 
 /*
  * Exfat Print

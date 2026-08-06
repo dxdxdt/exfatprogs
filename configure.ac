@@ -57,4 +57,13 @@ AC_ARG_ENABLE([tests],
 )
 AM_CONDITIONAL([ENABLE_TESTS], [test "x$enable_tests" = xyes])
 
+AC_ARG_ENABLE([iostats],
+	[AS_HELP_STRING([--enable-iostats], [enable I/O statistics collection support])],
+	[enable_iostats=$enableval],
+	[enable_iostats=no]
+)
+AS_IF([test "x$enable_iostats" = xyes],
+	[AC_DEFINE([EXFAT_NO_IOSTATS], [0], [Define to 1 to disable I/O statistics collection])],
+	[AC_DEFINE([EXFAT_NO_IOSTATS], [1], [Define to 1 to disable I/O statistics collection])])
+
 AC_OUTPUT
