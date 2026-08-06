@@ -1304,12 +1304,77 @@ out:
 	return retval;
 }
 
-/*
- * Checks whether there are other directory entries following the unused
- * directory entries. If so, sets the unused directory entries to the deleted
- * directory entries(Type 0x7F).
- */
-static int check_unused_dentry(struct exfat_de_iter *de_iter,
+static int scan_unused_dentry(struct exfat_de_iter *de_iter,
+		struct exfat_inode *dir)
+{
+	struct exfat *exfat = de_iter->exfat;
+	char *buffer;
+	off_t file_offset;
+	clus_t clus;
+	clus_t clus_idx;
+	unsigned int clus_offset;
+	unsigned int read_size;
+	unsigned int size;
+	unsigned int offset;
+	int ret;
+
+	file_offset = exfat_de_iter_file_offset(de_iter);
+	if ((uint64_t)file_offset >= dir->size ||
+		dir->size - (uint64_t)file_offset <= DENTRY_SIZE)
+		return 0;
+
+	read_size = MIN(exfat->clus_size, 128 * KB);
+	buffer = malloc(read_size);
+	if (!buffer)
+		return -ENOMEM;
+
+	file_offset += DENTRY_SIZE;
+	clus_idx = file_offset / exfat->clus_size;
+	clus_offset = file_offset % exfat->clus_size;
+	ret = exfat_get_clus(exfat, dir, clus_idx, &clus);
+	if (ret)
+		goto out;
+
+	ret = 0;
+	while ((uint64_t)file_offset < dir->size) {
+		size = MIN(read_size, exfat->clus_size - clus_offset);
+		size = MIN(size, (unsigned int)(dir->size - file_offset));
+		if (!exfat_read_full(exfat->blk_dev->dev_fd, buffer, size,
+				exfat_c2o(exfat, clus) + clus_offset)) {
+			ret = -EIO;
+			break;
+		}
+
+		for (offset = 0; offset + DENTRY_SIZE <= size;
+				offset += DENTRY_SIZE) {
+			if (buffer[offset] != EXFAT_LAST) {
+				ret = 1;
+				break;
+			}
+		}
+		if (ret)
+			break;
+
+		file_offset += size;
+		clus_offset += size;
+		if (clus_offset == exfat->clus_size &&
+				(uint64_t)file_offset < dir->size) {
+			ret = exfat_get_inode_next_clus(exfat, dir, clus, &clus);
+			if (ret)
+				break;
+			if (clus == EXFAT_EOF_CLUSTER) {
+				ret = -EIO;
+				break;
+			}
+			clus_offset = 0;
+		}
+	}
+out:
+	free(buffer);
+	return ret;
+}
+
+static int check_unused_dentry_slow(struct exfat_de_iter *de_iter,
 		struct exfat_inode *dir)
 {
 	int ret, i;
@@ -1353,6 +1418,20 @@ static int check_unused_dentry(struct exfat_de_iter *de_iter,
 	}
 
 	return 1;
+}
+
+/*
+ * Checks whether there are other directory entries following the unused
+ * directory entries. If so, sets the unused directory entries to the deleted
+ * directory entries(Type 0x7F).
+ */
+static int check_unused_dentry(struct exfat_de_iter *de_iter,
+		struct exfat_inode *dir)
+{
+	if (scan_unused_dentry(de_iter, dir) == 0)
+		return 0;
+
+	return check_unused_dentry_slow(de_iter, dir);
 }
 
 static int read_children(struct exfat_fsck *fsck, struct exfat_inode *dir)
