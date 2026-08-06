@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <wchar.h>
 #include <limits.h>
+#include <time.h>
 #include <assert.h>
 
 #include "exfat_ondisk.h"
@@ -66,6 +67,125 @@ const char *dummy_bootcode =
 	"Please insert a bootable disk and press any key to try again.\r\n"
 const char *dummy_bootcode_msg = DEFAULT_DUMMY_BOOTCODE_MSG;
 /* static_assert(sizeof(DEFAULT_DUMMY_BOOTCODE_MSG) - 1 <= EXFAT_MAX_BOOTCODE_MSGLEN); */
+
+/*
+ * I/O statistics data collection facilities
+ *
+ * If the boolean env var EXFAT_PRINT_IOSTAT is set, the utils including dump,
+ * fsck and mkfs print I/O stats before exiting.
+ *
+ * This feature is disabled by default and can be enabled by configuring the
+ * project like so:
+ *
+ *   ./configure --enable-iostats
+ *
+ * The code required for data collection may have some performance impact on
+ * embedded systems. Please use with care.
+ */
+
+#ifndef EXFAT_IOSTATS_COLLECTION
+/*
+ * Validate the code but do not compile in(see "21) Conditional Compilation" in
+ * Linux kernel coding style).
+ */
+#define EXFAT_IOSTATS_COLLECTION (0)
+#endif
+
+/* Bit flags for io_stat.err and io_stat.ovf */
+
+#define EXFAT_IOSTAT_READ	(0x01)
+#define EXFAT_IOSTAT_WRITE	(0x02)
+#define EXFAT_IOSTAT_DISCARD	(0x04)
+#define EXFAT_IOSTAT_SYNC	(0x08)
+
+static struct {
+	/* --- cacheline #1 --- */
+	struct {
+		off_t read;
+		off_t write;
+	} len;
+	struct {
+		struct timespec read;
+		struct timespec write;
+		struct timespec sync;
+	} time;
+	/* --- cacheline #2 (use these only when necessary) --- */
+	struct {
+		off_t len;
+		struct timespec time;
+	} discard;
+	int err;
+	int ovf;
+} io_stat;
+
+/* timespec functions from libbsd (see timeradd(3bsd)) */
+
+static inline void exfat_tsadd(const struct timespec *a, const struct timespec *b,
+		struct timespec *res)
+{
+	if (EXFAT_IOSTATS_COLLECTION) {
+		res->tv_sec = a->tv_sec + b->tv_sec;
+		res->tv_nsec = a->tv_nsec + b->tv_nsec;
+		if (res->tv_nsec >= 1000000000L) {
+			res->tv_sec++;
+			res->tv_nsec -= 1000000000L;
+		}
+	}
+}
+
+static inline void exfat_tssub(const struct timespec *a, const struct timespec *b,
+		struct timespec *res)
+{
+	if (EXFAT_IOSTATS_COLLECTION) {
+		res->tv_sec = a->tv_sec - b->tv_sec;
+		res->tv_nsec = a->tv_nsec - b->tv_nsec;
+		if (res->tv_nsec < 0) {
+			res->tv_sec--;
+			res->tv_nsec += 1000000000L;
+		}
+	}
+}
+
+static inline void exfat_getts(struct timespec *res)
+{
+	if (EXFAT_IOSTATS_COLLECTION)
+		clock_gettime(CLOCK_MONOTONIC, res);
+}
+
+static inline off_t exfat_iostat_ofsadd(off_t a, off_t b, int f)
+{
+	if (EXFAT_IOSTATS_COLLECTION) {
+		a += b;
+		if (a < 0)
+			io_stat.ovf |= f;
+		return a;
+	}
+	/* Hopefully, the compiler inlines the function to
+	 *
+	 *   a = a;
+	 *
+	 * and it will eventually get optimised out.
+	 */
+	return a;
+}
+
+/*
+ * Do getenv(), parse the value as integer, return true if non-zero. Return -1
+ * if the env var is non-existent or not an integer value.
+ */
+static int get_intbool_envvar(const char *name)
+{
+	const char *env = getenv(name);
+
+	if (env != NULL) {
+		int v = -1;
+
+		if (sscanf(env, "%d", &v) == 1)
+			return v != 0;
+	}
+
+	return -1;
+}
 
 void exfat_bitmap_set_range(struct exfat *exfat, unsigned char *bitmap,
 			    clus_t start_clus, clus_t count)
@@ -575,6 +695,10 @@ int exfat_read2(int fd, void *buf, off_t *size, off_t *offset)
 	uint8_t *m = buf;
 	size_t rem;
 	ssize_t size_read;
+	int ret = 0;
+	struct timespec ts_a, ts_b;
+
+	exfat_getts(&ts_a);
 
 	while (*size > 0) {
 		rem = (size_t)MIN(*size, SSIZE_MAX);
@@ -582,19 +706,31 @@ int exfat_read2(int fd, void *buf, off_t *size, off_t *offset)
 		size_read = *offset >= 0 ?
 			pread(fd, m, rem, *offset) :
 			read(fd, m, rem);
-		if (size_read == 0)
-			return 1;
-		if (size_read < 0)
-			return -errno;
+		if (size_read == 0) {
+			ret = 1;
+			goto out;
+		}
+		if (size_read < 0) {
+			io_stat.err |= EXFAT_IOSTAT_READ;
+			ret = -errno;
+			goto out;
+		}
 		assert((size_t)size_read <= rem);
 
+		io_stat.len.read = exfat_iostat_ofsadd(io_stat.len.read,
+						       size_read, EXFAT_IOSTAT_READ);
 		m += size_read;
 		*size -= size_read;
 		if (*offset >= 0)
 			*offset += size_read;
 	}
+out:
+	exfat_getts(&ts_b);
 
-	return 0;
+	exfat_tssub(&ts_b, &ts_a, &ts_b);
+	exfat_tsadd(&ts_b, &io_stat.time.read, &io_stat.time.read);
+
+	return ret;
 }
 
 bool exfat_read_full(int fd, void *buf, size_t size, off_t offset)
@@ -623,6 +759,10 @@ int exfat_write2(int fd, const void *buf, off_t *size, off_t *offset)
 	const uint8_t *m = buf;
 	size_t rem;
 	ssize_t size_written;
+	int ret = 0;
+	struct timespec ts_a, ts_b;
+
+	exfat_getts(&ts_a);
 
 	while (*size > 0) {
 		rem = (size_t)MIN(*size, SSIZE_MAX);
@@ -633,19 +773,30 @@ int exfat_write2(int fd, const void *buf, off_t *size, off_t *offset)
 		if (size_written == 0) {
 			/* the dark corner of POSIX: we mirror glibc's defence mechanism here */
 			exfat_debug("pwrite() returned zero. This VFS is doing something fishy!");
-			return -EIO;
+			ret = -EIO;
+			goto out;
 		}
-		if (size_written < 0)
-			return -errno;
+		if (size_written < 0) {
+			io_stat.err |= EXFAT_IOSTAT_WRITE;
+			ret = -errno;
+			goto out;
+		}
 		assert((size_t)size_written <= rem);
 
+		io_stat.len.write = exfat_iostat_ofsadd(io_stat.len.write,
+							size_written, EXFAT_IOSTAT_WRITE);
 		m += size_written;
 		*size -= size_written;
 		if (*offset >= 0)
 			*offset += size_written;
 	}
+out:
+	exfat_getts(&ts_b);
 
-	return 0;
+	exfat_tssub(&ts_b, &ts_a, &ts_b);
+	exfat_tsadd(&ts_b, &io_stat.time.write, &io_stat.time.write);
+
+	return ret;
 }
 
 bool exfat_write_full(int fd, const void *buf, size_t size, off_t offset)
@@ -667,6 +818,7 @@ int exfat_write_zero2(int fd, off_t size, off_t offset, size_t bs)
 	int ret = 0;
 	size_t iter_size;
 	ssize_t wsize;
+	struct timespec ts_a, ts_b;
 
 	if (bs == 0)
 		bs = 4 * KB;
@@ -674,6 +826,8 @@ int exfat_write_zero2(int fd, off_t size, off_t offset, size_t bs)
 	zm = exfat_map_zeromem(bs, &mapped);
 	if (zm == NULL)
 		return -errno;
+
+	exfat_getts(&ts_a);
 
 	while (size > 0) {
 		iter_size = (size_t)MIN(size, SSIZE_MAX);
@@ -684,26 +838,59 @@ int exfat_write_zero2(int fd, off_t size, off_t offset, size_t bs)
 			write(fd, zm, iter_size);
 
 		if (wsize <= 0) {
+			io_stat.err |= EXFAT_IOSTAT_WRITE;
 			ret = -EIO;
 			goto out;
 		}
 
+		io_stat.len.write = exfat_iostat_ofsadd(io_stat.len.write,
+							wsize, EXFAT_IOSTAT_WRITE);
 		size -= wsize;
 		if (offset >= 0)
 			offset += wsize;
 	}
 
 out:
+	exfat_getts(&ts_b);
+
+	exfat_tssub(&ts_b, &ts_a, &ts_b);
+	exfat_tsadd(&ts_b, &io_stat.time.write, &io_stat.time.write);
+
 	exfat_unmap_mm(zm, bs, &mapped);
+	return ret;
+}
+
+int exfat_fsync(int fd)
+{
+	int ret;
+	struct timespec ts_a, ts_b;
+
+	exfat_getts(&ts_a);
+	ret = fsync(fd);
+	exfat_getts(&ts_b);
+
+	exfat_tssub(&ts_b, &ts_a, &ts_b);
+	exfat_tsadd(&ts_b, &io_stat.time.sync, &io_stat.time.sync);
+	if (EXFAT_IOSTATS_COLLECTION && ret)
+		io_stat.err |= EXFAT_IOSTAT_SYNC;
+
 	return ret;
 }
 
 int exfat_discard_blocks(int fd, uint64_t start, uint64_t len)
 {
 	uint64_t range[2] = { start, len };
+	struct timespec ts_a, ts_b;
 
+	exfat_getts(&ts_a);
 	if (ioctl(fd, BLKDISCARD, &range) < 0)
 		return errno;
+	exfat_getts(&ts_b);
+
+	exfat_tssub(&ts_b, &ts_a, &ts_b);
+	exfat_tsadd(&ts_b, &io_stat.discard.time, &io_stat.discard.time);
+	io_stat.discard.len = exfat_iostat_ofsadd(io_stat.discard.len, len, EXFAT_IOSTAT_DISCARD);
+
 	return 0;
 }
 
@@ -1195,7 +1382,7 @@ int exfat_check_written_data(struct exfat_blk_dev *bd,
 	if (len == 0)
 		return 0;
 
-	ret = fsync(bd->dev_fd);
+	ret = exfat_fsync(bd->dev_fd);
 	if (ret)
 		return ret;
 
@@ -1986,14 +2173,56 @@ void exfat_put_bootstrap_code(const char *user_msg, void *dst, unsigned int code
 
 bool exfat_isatty_stdio(void)
 {
-	const char *env = getenv("EXFAT_TTY_OVERRIDE");
+	const int ev = get_intbool_envvar("EXFAT_TTY_OVERRIDE");
 
-	if (env != NULL) {
-		int v = -1;
-
-		if (sscanf(env, "%d", &v) == 1 && v >= 0)
-			return v != 0;
-	}
+	if (ev >= 0)
+		return ev;
 
 	return isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+}
+
+void exfat_print_iostat(void)
+{
+	struct timespec total = {0};
+	bool invalid;
+
+	if (!EXFAT_IOSTATS_COLLECTION)
+		return;
+
+	if (get_intbool_envvar("EXFAT_PRINT_IOSTAT") <= 0)
+		return;
+
+	invalid = io_stat.err | io_stat.ovf;
+	exfat_tsadd(&total, &io_stat.time.read, &total);
+	exfat_tsadd(&total, &io_stat.time.write, &total);
+	exfat_tsadd(&total, &io_stat.time.sync, &total);
+	exfat_tsadd(&total, &io_stat.discard.time, &total);
+
+	fprintf(stderr, "IO stats:\n"
+			"  read:    %ld.%06lds %lld %s%s\n"
+			"  write:   %ld.%06lds %lld %s%s\n"
+			"  discard: %ld.%06lds %lld %s\n"
+			"  sync:    %ld.%06lds %s\n"
+			"  total:   %ld.%06lds\n"
+			"  valid:   %s\n",
+			(long)io_stat.time.read.tv_sec,
+			(long)io_stat.time.read.tv_nsec / 1000,
+			(long long)io_stat.len.read,
+			io_stat.err & EXFAT_IOSTAT_READ ? "ERR" : "",
+			io_stat.ovf & EXFAT_IOSTAT_READ ? "OVF" : "",
+			(long)io_stat.time.write.tv_sec,
+			(long)io_stat.time.write.tv_nsec / 1000,
+			(long long)io_stat.len.write,
+			io_stat.err & EXFAT_IOSTAT_WRITE ? "ERR" : "",
+			io_stat.ovf & EXFAT_IOSTAT_WRITE ? "OVF" : "",
+			(long)io_stat.discard.time.tv_sec,
+			(long)io_stat.discard.time.tv_nsec / 1000,
+			(long long)io_stat.discard.len,
+			io_stat.ovf & EXFAT_IOSTAT_DISCARD ? "OVF" : "",
+			(long)io_stat.time.sync.tv_sec,
+			(long)io_stat.time.sync.tv_nsec / 1000,
+			io_stat.err & EXFAT_IOSTAT_SYNC ? "ERR" : "",
+			(long)total.tv_sec,
+			(long)total.tv_nsec / 1000,
+			invalid ? "false" : "true");
 }

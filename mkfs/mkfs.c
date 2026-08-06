@@ -1667,7 +1667,8 @@ int main(int argc, char *argv[])
 		gpt_header_to_le(finfo.gpt.head_main);
 		gpt_header_to_le(finfo.gpt.head_backup);
 
-		if (!exfat_write_mkfs_data_regions(&bd, finfo.gpt.regions) || fsync(bd.dev_fd)) {
+		if (!exfat_write_mkfs_data_regions(&bd, finfo.gpt.regions) ||
+				exfat_fsync(bd.dev_fd)) {
 			exfat_err("Failed to write GPT regions: %s\n", strerror(errno));
 			ret = -1;
 			goto out;
@@ -1697,7 +1698,7 @@ int main(int argc, char *argv[])
 
 	if (!quiet)
 		exfat_info("Synchronizing...\n");
-	ret = fsync(bd.dev_fd);
+	ret = exfat_fsync(bd.dev_fd);
 	if (ret) {
 		exfat_err("Sync failed: %s\n", strerror(errno));
 		goto out;
@@ -1719,7 +1720,8 @@ out:
 
 		exfat_zero_mkfs_data_regions(finfo.gpt.regions);
 
-		if (!exfat_write_mkfs_data_regions(&bd, finfo.gpt.regions) || fsync(bd.dev_fd))
+		if (!exfat_write_mkfs_data_regions(&bd, finfo.gpt.regions) ||
+				exfat_fsync(bd.dev_fd))
 			exfat_err("Failed to wipe out GPT structures: %s\n", strerror(errno));
 	}
 
@@ -1740,6 +1742,7 @@ out:
 	}
 	else
 		exfat_err("\nexFAT format fail!\n");
+	exfat_print_iostat();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 

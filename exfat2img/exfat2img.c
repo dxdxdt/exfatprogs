@@ -874,7 +874,7 @@ static int restore_from_stdin(struct exfat2img *ei)
 		}
 	}
 out:
-	if (fsync(ei->out_fd)) {
+	if (exfat_fsync(ei->out_fd)) {
 		exfat_err("failed to fsync: %d\n", errno);
 		ret = -EIO;
 	}
@@ -986,9 +986,9 @@ int main(int argc, char * const argv[])
 		 * pipe or chardev(EINVAL). If stdout was redirected to a file and it fails, well,
 		 * that's on the user who used shell redirection to do such a critical operation.
 		 */
-		fsync(ei.out_fd);
+		exfat_fsync(ei.out_fd);
 	} else {
-		err = fsync(ei.out_fd);
+		err = exfat_fsync(ei.out_fd);
 		if (err) {
 			exfat_err("failed to fsync %s. %d\n", out_path, errno);
 			goto out;
@@ -1003,5 +1003,6 @@ int main(int argc, char * const argv[])
 out:
 	free_exfat2img(&ei);
 	exfat_deinit_user_input(&ui);
+	exfat_print_iostat();
 	return err == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
