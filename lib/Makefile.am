@@ -5,9 +5,12 @@ libexfat_a_SOURCES = libexfat.c exfat_fs.c exfat_dir.c utils.c
 
 if ENABLE_TESTS
 
-noinst_PROGRAMS = tests/suite0000-bitmap
+noinst_PROGRAMS = tests/suite0000-bitmap tests/suite0001-parse
 
 tests_suite0000_bitmap_SOURCES = tests/suite0000-bitmap.c
 tests_suite0000_bitmap_LDADD = libexfat.a
+
+tests_suite0001_parse_SOURCES = tests/suite0001-parse.c
+tests_suite0001_parse_LDADD = libexfat.a
 
 endif

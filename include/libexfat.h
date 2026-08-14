@@ -317,7 +317,17 @@ int exfat_o2c(struct exfat *exfat, off_t device_offset,
 bool exfat_heap_clus(struct exfat *exfat, clus_t clus);
 int exfat_root_clus_count(struct exfat *exfat);
 int read_boot_sect(struct exfat_blk_dev *bdev, struct pbr **bs);
-int exfat_parse_ulong(const char *s, unsigned long *out);
+
+#define DECLARE_PARSE_NUM(OUT_T, NAME) int NAME(const char *s, OUT_T *out)
+DECLARE_PARSE_NUM(unsigned long, exfat_parse_ulong);
+DECLARE_PARSE_NUM(unsigned long long, exfat_parse_ulonglong);
+DECLARE_PARSE_NUM(long, exfat_parse_long);
+DECLARE_PARSE_NUM(long long, exfat_parse_longlong);
+#undef DECLARE_PARSE_NUM
+
+int exfat_parse_swver(const char *in, unsigned short *out);
+int exfat_cmp_swver(const unsigned short *a, const unsigned short *b);
+
 int exfat_check_name(__le16 *utf16_name, int len);
 /*
  * Read back from the target device to confirm the successful write.
