@@ -995,7 +995,7 @@ int main(int argc, char * const argv[])
 		}
 	}
 
-	printf("%ld files found, %ld directories dumped, %llu kbytes written\n",
+	fprintf(stderr, "%ld files found, %ld directories dumped, %llu kbytes written\n",
 	       exfat_stat.file_count,
 	       exfat_stat.dir_count,
 	       (unsigned long long)DIV_ROUND_UP(exfat_stat.written_bytes, 1024));
