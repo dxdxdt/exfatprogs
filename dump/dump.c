@@ -36,14 +36,12 @@
 static void usage(void)
 {
 	fprintf(stderr, "Usage: dump.exfat\n");
-	fprintf(stderr, "\t-d | --dentry-set=path                Show directory entry set\n");
-	fprintf(stderr, "\t-c | --cluster-chain                  Show cluster chain\n");
-	fprintf(stderr,
-		"\t-s | --scan-dir=dir-path              Scan and show directory entry sets\n");
-	fprintf(stderr,
-		"\t-r | --recursive                      Scan and show directory entry sets recursively\n");
-	fprintf(stderr, "\t-V | --version                        Show version\n");
-	fprintf(stderr, "\t-h | --help                           Show help\n");
+	fprintf(stderr, "\t-d | --dentry-set=path    Show directory entry set\n");
+	fprintf(stderr, "\t-c | --cluster-chain      Show cluster chain\n");
+	fprintf(stderr, "\t-s | --scan-dir=dir-path  Scan and show directory entry sets\n");
+	fprintf(stderr, "\t-r | --recursive          Scan and show directory entry sets recursively\n");
+	fprintf(stderr, "\t-V | --version            Show version\n");
+	fprintf(stderr, "\t-h | --help               Show help\n");
 
 	exit(EXIT_FAILURE);
 }

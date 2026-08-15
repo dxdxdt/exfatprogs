@@ -848,23 +848,24 @@ static int exfat_create_root_dir(struct exfat_blk_dev *bd,
 static void usage(void)
 {
 	fputs("Usage: mkfs.exfat\n"
-		"\t-L | --volume-label=label                              Set volume label\n"
-		"\t-U | --volume-guid=guid                                Set volume GUID\n"
-		"\t-s | --sector-size=size(or suffixed by 'K')            Specify sector size\n"
-		"\t-c | --cluster-size=size(or suffixed by 'K' or 'M')    Specify cluster size\n"
-		"\t-b | --boundary-align=size(or suffixed by 'K' or 'M')  Specify boundary alignment\n"
-		"\t     --pack-bitmap                                     Move bitmap into FAT segment\n"
-		"\t     --upcase=file                                     Specify up-case table binary file\n"
-		"\t     --bootcode-msg=message                            Specify custom message in MBR bootstrap code\n"
-		"\t-P | --partition-table=auto|none|mbr|gpt               Specify partition table\n"
-		"\t-f | --full-format                                     Full format\n"
-		"\t-F | --force                                           Overwrite an existing non-exFAT filesystem\n"
-		"\t-C | --check-written                                   Verify written filesystem metadata by read-back\n"
-		"\t-K | --no-discard                                      Do not discard blocks\n"
-		"\t-V | --version                                         Show version\n"
-		"\t-q | --quiet                                           Print only errors\n"
-		"\t-v | --verbose                                         Print debug\n"
-		"\t-h | --help                                            Show help\n",
+		"\t-L | --volume-label=label                 Set volume label\n"
+		"\t-U | --volume-guid=guid                   Set volume GUID\n"
+		"\t-s | --sector-size=size[K]                Specify sector size\n"
+		"\t-c | --cluster-size=size[K|M]             Specify cluster size\n"
+		"\t-b | --boundary-align=size[K|M]           Specify boundary alignment\n"
+		"\t     --pack-bitmap                        Move bitmap into FAT segment\n"
+		"\t     --upcase=file                        Specify up-case table binary file\n"
+		"\t     --bootcode-msg=message               Specify custom message in MBR\n"
+		"\t                                          bootstrap code\n"
+		"\t-P | --partition-table=auto|none|mbr|gpt  Specify partition table\n"
+		"\t-f | --full-format                        Full format\n"
+		"\t-F | --force                              Overwrite existing filesystem\n"
+		"\t-C | --check-written                      Verify written data by read-back\n"
+		"\t-K | --no-discard                         Do not discard blocks\n"
+		"\t-V | --version                            Show version\n"
+		"\t-q | --quiet                              Print only errors\n"
+		"\t-v | --verbose                            Print debug\n"
+		"\t-h | --help                               Show help\n",
 		stderr);
 
 	exit(EXIT_FAILURE);
