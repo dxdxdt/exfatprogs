@@ -71,6 +71,7 @@ struct buffer_desc {
 struct exfat *exfat_alloc_exfat(struct exfat_blk_dev *blk_dev, struct pbr *bs,
 				 struct exfat_inode *root);
 void exfat_free_exfat(struct exfat *exfat);
+int exfat_mark_volume_dirty(struct exfat *exfat, bool dirty);
 
 struct exfat_inode *exfat_alloc_inode(__u16 attr);
 void exfat_free_inode(struct exfat_inode *node);

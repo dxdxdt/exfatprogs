@@ -364,29 +364,6 @@ out:
 	return ret;
 }
 
-static int exfat_mark_volume_dirty(struct exfat *exfat, bool dirty)
-{
-	uint16_t flags;
-
-	flags = le16_to_cpu(exfat->bs->bsx.vol_flags);
-	if (dirty)
-		flags |= 0x02;
-	else
-		flags &= ~0x02;
-
-	exfat->bs->bsx.vol_flags = cpu_to_le16(flags);
-	if (!exfat_write_full(exfat->blk_dev->dev_fd, exfat->bs, sizeof(struct pbr), 0)) {
-		exfat_err("failed to set VolumeDirty\n");
-		return -EIO;
-	}
-
-	if (exfat_fsync(exfat->blk_dev->dev_fd) != 0) {
-		exfat_err("failed to set VolumeDirty\n");
-		return -EIO;
-	}
-	return 0;
-}
-
 static int read_boot_region(struct exfat_blk_dev *bd, struct pbr **pbr,
 			    int bs_offset, unsigned int sect_size,
 			    bool verbose)
