@@ -28,7 +28,7 @@ EXTRA_DIST =			\
 	exfat2img/Android.bp	\
 	README.md
 
-if ENABLE_DOSATTR
+if ENABLE_FTS
 dist_man1_MANS +=		\
 	manpages/lsdosattr.1	\
 	manpages/chdosattr.1

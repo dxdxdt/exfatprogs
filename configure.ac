@@ -37,11 +37,11 @@ AC_CONFIG_FILES([
 ])
 
 AC_CHECK_HEADERS([fts.h], [have_fts_h="yes"])
-AM_CONDITIONAL([ENABLE_DOSATTR], [test "x$have_fts_h" = "xyes"])
+AM_CONDITIONAL([ENABLE_FTS], [test "x$have_fts_h" = "xyes"])
 AM_COND_IF(
-	[ENABLE_DOSATTR],
+	[ENABLE_FTS],
 	[AC_CHECK_LIB([fts], [fts_open])],
-	[echo "<fts.h> not found. Not building dosattr programs"]
+	[echo "<fts.h> not found. Some programs won't be built"]
 )
 
 # There are two variants of libblkid: one from util-linux and the other from
