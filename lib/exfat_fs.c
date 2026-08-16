@@ -122,8 +122,9 @@ void exfat_free_exfat(struct exfat *exfat)
 int exfat_mark_volume_dirty(struct exfat *exfat, bool dirty)
 {
 	uint16_t flags;
+	const __le16 saved_flags = exfat->bs->bsx.vol_flags;
 
-	flags = le16_to_cpu(exfat->bs->bsx.vol_flags);
+	flags = le16_to_cpu(saved_flags);
 	if (dirty)
 		flags |= 0x02;
 	else
@@ -132,11 +133,13 @@ int exfat_mark_volume_dirty(struct exfat *exfat, bool dirty)
 	exfat->bs->bsx.vol_flags = cpu_to_le16(flags);
 	if (!exfat_write_full(exfat->blk_dev->dev_fd, exfat->bs, sizeof(struct pbr), 0)) {
 		exfat_err("failed to set VolumeDirty\n");
+		exfat->bs->bsx.vol_flags = saved_flags;
 		return -EIO;
 	}
 
 	if (exfat_fsync(exfat->blk_dev->dev_fd) != 0) {
 		exfat_err("failed to set VolumeDirty\n");
+		exfat->bs->bsx.vol_flags = saved_flags;
 		return -EIO;
 	}
 	return 0;
