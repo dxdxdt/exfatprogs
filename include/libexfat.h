@@ -232,7 +232,25 @@ unsigned int exfat_count_used_clusters(const void *bitmap, const size_t size,
 
 void show_version(void);
 
-wchar_t exfat_bad_char(wchar_t w);
+static inline bool exfat_bad_char(unsigned short w)
+{
+	switch (w) {
+	case 0x0022: /* QUOTATION MARK:    (") */
+	case 0x002A: /* ASTERISK:          (*) */
+	case 0x002F: /* FORWARD SLASH:     (/) */
+	case 0x003A: /* COLON:             (:) */
+	case 0x003C: /* LESS-THAN SIGN:    (<) */
+	case 0x003E: /* GREATER-THAN SIGN: (>) */
+	case 0x003F: /* QUESTION MARK:     (?) */
+	case 0x005C: /* BACKSLASH:         (\) */
+	case 0x007C: /* PIPE:              (|) */
+		return true;
+	}
+
+	/* Control characters */
+	return w < 0x0020;
+}
+
 void boot_calc_checksum(const unsigned char *sector, size_t size,
 		bool is_boot_sec, __le32 *checksum);
 void exfat_init_user_input(struct exfat_user_input *ui);

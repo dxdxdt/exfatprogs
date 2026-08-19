@@ -257,15 +257,6 @@ unsigned int exfat_count_used_clusters(const void *bitmap, const size_t size,
 	return ret;
 }
 
-
-wchar_t exfat_bad_char(wchar_t w)
-{
-	return (w < 0x0020)
-		|| (w == '*') || (w == '?') || (w == '<') || (w == '>')
-		|| (w == '|') || (w == '"') || (w == ':') || (w == '/')
-		|| (w == '\\');
-}
-
 void boot_calc_checksum(const unsigned char *sector, size_t size,
 		bool is_boot_sec, __le32 *checksum)
 {
@@ -2013,19 +2004,12 @@ int exfat_cmp_swver(const unsigned short *in_a, const unsigned short *in_b)
 	return 0;
 }
 
-static inline int check_bad_utf16_char(unsigned short w)
-{
-	return (w < 0x0020) || (w == '*') || (w == '?') || (w == '<') ||
-		(w == '>') || (w == '|') || (w == '"') || (w == ':') ||
-		(w == '/') || (w == '\\');
-}
-
 int exfat_check_name(__le16 *utf16_name, int len)
 {
 	int i;
 
 	for (i = 0; i < len; i++) {
-		if (check_bad_utf16_char(le16_to_cpu(utf16_name[i])))
+		if (exfat_bad_char(le16_to_cpu(utf16_name[i])))
 			break;
 	}
 
