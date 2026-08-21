@@ -167,9 +167,9 @@ static int get_intbool_envvar(const char *name)
 	const char *env = getenv(name);
 
 	if (env != NULL) {
-		int v = -1;
+		long v = -1;
 
-		if (sscanf(env, "%d", &v) == 1)
+		if (exfat_parse_long(env, &v) == 0 && v >= 0)
 			return v != 0;
 	}
 
@@ -466,39 +466,16 @@ static bool exfat_dir_has_child(const int at, const char *path)
 static int exfat_cmp_kernel_ver(const unsigned short *req)
 {
 	struct utsname uts;
-	unsigned short v[3] = { 0, };
-	unsigned long long nreq = 0, nhost = 0;
+	unsigned short parsed[3];
 	int ret;
 
-	ret = uname(&uts);
-	if (ret)
+	if (uname(&uts) || exfat_parse_swver(uts.release, parsed))
 		return -1;
 
-	switch (count_dots(uts.release, 65)) {
-	case 0:
-		ret = sscanf(uts.release, "%hu", v) != 1;
-		break;
-	case 1:
-		ret = sscanf(uts.release, "%hu.%hu", v + 0, v + 1) != 2;
-		break;
-	default:
-		ret = sscanf(uts.release, "%hu.%hu.%hu", v + 0, v + 1, v + 2) != 3;
-	}
-	if (ret) {
-		errno = EINVAL;
-		return -1;
-	}
+	exfat_debug("Kernel version: %u.%u.%u\n", parsed[0], parsed[1], parsed[2]);
 
-	exfat_debug("Kernel version: %hu.%hu.%hu\n", v[0], v[1], v[2]);
-
-	nreq  |= (unsigned long long)req[0] << 32;
-	nreq  |= (unsigned long long)req[1] << 16;
-	nreq  |= (unsigned long long)req[2];
-	nhost |= (unsigned long long)v[0]   << 32;
-	nhost |= (unsigned long long)v[1]   << 16;
-	nhost |= (unsigned long long)v[2];
-
-	return nreq > nhost ? 1 : 0;
+	ret = exfat_cmp_swver(req, parsed);
+	return ret > 0 ? 1 : 0;
 }
 
 int exfat_get_blk_dev_info(struct exfat_user_input *ui,
@@ -1959,20 +1936,80 @@ err:
 	return err;
 }
 
-int exfat_parse_ulong(const char *s, unsigned long *out)
+/* Abstraction for exfat_parse_*() */
+#define DEFINE_PARSE_NUM(OUT_T, NAME, STRTO_F)		\
+	int NAME(const char *s, OUT_T *out)		\
+	{						\
+		const int saved_errno = errno;		\
+		int ret = 0;				\
+		char *endptr = NULL;			\
+							\
+		errno = 0;				\
+		*out = STRTO_F(s, &endptr, 0);		\
+		if (errno)				\
+			ret = -errno;			\
+		if (s == endptr || *endptr != '\0')	\
+			ret = -EINVAL;			\
+							\
+		errno = saved_errno;			\
+		return ret;				\
+	}
+
+DEFINE_PARSE_NUM(unsigned long, exfat_parse_ulong, strtoul)
+DEFINE_PARSE_NUM(unsigned long long, exfat_parse_ulonglong, strtoull)
+DEFINE_PARSE_NUM(long, exfat_parse_long, strtol)
+DEFINE_PARSE_NUM(long long, exfat_parse_longlong, strtoll)
+
+#undef DEFINE_PARSE_NUM
+
+int exfat_parse_swver(const char *in, unsigned short *out)
 {
-	char *endptr;
+	const int saved_errno = errno;
+	char *endptr = NULL;
+	unsigned long v;
+	unsigned short ret[3] = {0};
 
-	errno = 0;
+	if (*in == 0)
+		goto inval;
 
-	*out = strtoul(s, &endptr, 0);
+	for (size_t i = 0; i < 3 && *in != 0; i++) {
+		errno = 0;
+		v = strtoul(in, &endptr, 10);
+		if (errno != 0 || in == endptr || v > UINT16_MAX)
+			goto inval;
+		ret[i] = (unsigned short)v;
 
-	if (errno)
-		return -errno;
+		if (*endptr == '.')
+			in = endptr + 1;
+		else
+			break;
+	}
 
-	if (s == endptr || *endptr != '\0')
-		return -EINVAL;
+	out[0] = ret[0];
+	out[1] = ret[1];
+	out[2] = ret[2];
+	errno = saved_errno;
+	return 0;
+inval:
+	errno = EINVAL;
+	return -1;
+}
 
+int exfat_cmp_swver(const unsigned short *in_a, const unsigned short *in_b)
+{
+	uint64_t a = 0, b = 0;
+
+	a |= (uint64_t)in_a[0] << 32;
+	a |= (uint64_t)in_a[1] << 16;
+	a |= (uint64_t)in_a[2];
+	b |= (uint64_t)in_b[0] << 32;
+	b |= (uint64_t)in_b[1] << 16;
+	b |= (uint64_t)in_b[2];
+
+	if (a < b)
+		return -1;
+	else if (a > b)
+		return 1;
 	return 0;
 }
 

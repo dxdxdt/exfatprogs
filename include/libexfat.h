@@ -317,7 +317,46 @@ int exfat_o2c(struct exfat *exfat, off_t device_offset,
 bool exfat_heap_clus(struct exfat *exfat, clus_t clus);
 int exfat_root_clus_count(struct exfat *exfat);
 int read_boot_sect(struct exfat_blk_dev *bdev, struct pbr **bs);
-int exfat_parse_ulong(const char *s, unsigned long *out);
+
+#define DECLARE_PARSE_NUM(OUT_T, NAME) int NAME(const char *s, OUT_T *out)
+DECLARE_PARSE_NUM(unsigned long, exfat_parse_ulong);
+DECLARE_PARSE_NUM(unsigned long long, exfat_parse_ulonglong);
+DECLARE_PARSE_NUM(long, exfat_parse_long);
+DECLARE_PARSE_NUM(long long, exfat_parse_longlong);
+#undef DECLARE_PARSE_NUM
+
+/*
+ * Parse a software version string
+ *
+ * Process a string until it encounters an invalid character. If at least one
+ * valid version number is parsed, output with the numbers parsed. Otherwise,
+ * return -1 and errno is set to EINVAL.
+ *
+ * Note that the function was originally implemented to parse Linux kernel
+ * version strings, which can be followed by an arbitrary user-supplied string
+ * (aka. CONFIG_LOCALVERSION). Therefore, the function stops processing when it
+ * encounters the trailing garbage(local version) in the string.
+ *
+ * For example, following strings are all valid:
+ *
+ *   "6.1.157-android14-11-gbd23337e42e7-ab14791245":	6.1.157
+ *   "6.6.77-8.el10.altarch.aarch64+64k":		6.6.77
+ *   "7.0.8-200.fc44.x86_64":				7.0.8
+ *   "6.17.0-1019-aws":					6.17.0
+ *
+ * And including(although confusingly):
+ *
+ *   "2foo.6":		2.0.0
+ *   "2.6foo.3":	2.6.0
+ *   "2.":		2.0.0
+ *   "2.6.":		2.6.0
+ *
+ * The Linux kernel versions are always in 3 numbers. However, the function also
+ * accepts version strings with 1 and 2 numbers for future use and correctness.
+ */
+int exfat_parse_swver(const char *in, unsigned short *out);
+int exfat_cmp_swver(const unsigned short *a, const unsigned short *b);
+
 int exfat_check_name(__le16 *utf16_name, int len);
 /*
  * Read back from the target device to confirm the successful write.
