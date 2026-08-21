@@ -2,7 +2,13 @@
 #include "exfat_ondisk.h"
 #include "libexfat.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <assert.h>
+
+#include <unistd.h>
+#include <fcntl.h>
 
 #define SET_SWVER(o, a, b, c)		\
 	do {				\
@@ -92,10 +98,96 @@ static void test_swver_parse(void)
 #undef EXPECT_VER
 }
 
+static void do_test_normalpath_logical(const char *path, const char *expected)
+{
+	const size_t len = strlen(path) + 1;
+	char *normal = malloc(len);
+	void *zm;
+	size_t newlen, pastlen;
+
+	assert(path[0] == '/' && expected[0] == '/');
+
+	memcpy(normal, path, len);
+	exfat_normalpath_logical(normal, '/');
+	assert(strcmp(normal, expected) == 0);
+
+	memcpy(normal, path, len);
+	exfat_normalpath_logical_scrub(normal, '/');
+	assert(strcmp(normal, expected) == 0);
+	newlen = strlen(normal) + 1;
+	pastlen = len - newlen;
+	zm = calloc(1, pastlen);
+	assert(memcmp(normal + newlen, zm, pastlen) == 0);
+
+	free(normal);
+	free(zm);
+}
+
+static void test_normalpath_logical0(void)
+{
+#define DO_TEST(INPUT, EXPECTED) do_test_normalpath_logical((INPUT), (EXPECTED))
+
+	DO_TEST("/.",					"/");
+	DO_TEST("/..",					"/");
+	DO_TEST("/./.",					"/");
+	DO_TEST("/././.",				"/");
+	DO_TEST("/./",					"/");
+	DO_TEST("/././",				"/");
+	DO_TEST("/./././",				"/");
+	DO_TEST("/",					"/");
+	DO_TEST("//",					"/");
+	DO_TEST("///",					"/");
+	DO_TEST("////",					"/");
+
+	DO_TEST("/a/bb/cccccc/dddddd/../../..",		"/a");
+	DO_TEST("/a/bb/cccccc/dddddd/../../../..",	"/");
+	DO_TEST("/a/bb/cccccc/dddddd/../../../../..",	"/");
+	DO_TEST("/a/bb/cccccc/dddddd/../../../",	"/a");
+	DO_TEST("/a/bb/cccccc/dddddd/../../../../",	"/");
+	DO_TEST("/a/bb/cccccc/dddddd/../../../../../",	"/");
+
+	DO_TEST("/./a/bb/cccccc/dddddd/../../..",		"/a");
+	DO_TEST("/a/./bb/cccccc/dddddd/../../../..",		"/");
+	DO_TEST("/a/bb/./cccccc/dddddd/../../../../..",		"/");
+	DO_TEST("/a/bb/cccccc/./dddddd/../../../",		"/a");
+	DO_TEST("/a/bb/cccccc/dddddd/./../../../../",		"/");
+	DO_TEST("/a/bb/cccccc/dddddd/../../.././../../",	"/");
+
+	DO_TEST("/aaa/bb/c",				"/aaa/bb/c");
+	DO_TEST("/./aaa/bb/c",				"/aaa/bb/c");
+	DO_TEST("/aaa/./bb/c",				"/aaa/bb/c");
+	DO_TEST("/aaa/bb/./c",				"/aaa/bb/c");
+	DO_TEST("/aaa/bb/c/.",				"/aaa/bb/c");
+	DO_TEST("/aaa/bb/c/./",				"/aaa/bb/c");
+
+	DO_TEST("/aaaa/../bbb/cc/d",			"/bbb/cc/d");
+	DO_TEST("/aaaa/../bbb/./cc/d",			"/bbb/cc/d");
+	DO_TEST("/aaaa/../bbb/cc/./d",			"/bbb/cc/d");
+	DO_TEST("/aaaa/../bbb/cc/d/",			"/bbb/cc/d");
+	DO_TEST("/aaaa/../bbb/cc/d/.",			"/bbb/cc/d");
+	DO_TEST("/aaaa/../bbb/cc/d/./",			"/bbb/cc/d");
+	DO_TEST("/aaaa/../bbb/cc/d/././",		"/bbb/cc/d");
+
+	DO_TEST("/aaaa/bbb/cc/d/..",			"/aaaa/bbb/cc");
+	DO_TEST("/aaaa/bbb/cc/d/../",			"/aaaa/bbb/cc");
+	DO_TEST("/aaaa/bbb/cc/d/../.",			"/aaaa/bbb/cc");
+	DO_TEST("/aaaa/bbb/cc/d/.././",			"/aaaa/bbb/cc");
+
+	DO_TEST("/../aaaa/bbb/cc/d",			"/aaaa/bbb/cc/d");
+	DO_TEST("/aaaa/../bbb/cc/d",			"/bbb/cc/d");
+	DO_TEST("/aaaa/bbb/cc/../d",			"/aaaa/bbb/d");
+
+	DO_TEST("/aaaa/../cc/../0000",			"/0000");
+	DO_TEST("/aaaa/../../d/0000",			"/d/0000");
+	DO_TEST("/aaaa/bbb/cc/../..",			"/aaaa");
+#undef DO_TEST
+}
+
 int main(void)
 {
 	test_swver_cmp();
 	test_swver_parse();
+	test_normalpath_logical0();
 
 	return 0;
 }
