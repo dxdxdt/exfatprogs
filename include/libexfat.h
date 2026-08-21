@@ -490,6 +490,36 @@ bool exfat_isatty_stdio(void);
 void exfat_print_iostat(void);
 
 /*
+ * Logically canonicalize path string
+ *
+ * path is assumed to be absolute(starts with '/').
+ *
+ * This is basically an over-engineered equivalent of GNU util `realpath -sm`,
+ * which purely operates on the string in-memory without touching any file
+ * system. Unlike the realpath implementation, this implementation does not
+ * allocate any memory. Instead, it operates directly on path using memmove()
+ * extensively.
+ *
+ * Fun fact(quirk): on Linux, argv passed to the main function of the program
+ * may be modified after launch and the change is reflected immediately in the
+ * process table(`ps` command). As a result, if the function is used on the
+ * argv, ps command will show garbled paths. To workaround this, the range after
+ * the first null-terminator will have to be zeroed out. For this, use the
+ * convenience wrapper exfat_normalpath_logical_scrub().
+ *
+ *
+ * If path is supplied from untrusted source, make sure path is limited to a
+ * reasonable length since the algorithm is O(N^2) in the worse case scenario.
+ * Note that Linux kernel imposes a reasonable limit on the size of memory
+ * allocated to process exec() syscall for argv and environ, so it's "reasonable
+ * safe" to use directly on argv in Linux.
+ *
+ * See also: realpath(1), exec(3)
+ */
+void exfat_normalpath_logical(char *path, const char sep);
+void exfat_normalpath_logical_scrub(char *path, const char sep);
+
+/*
  * Exfat Print
  */
 

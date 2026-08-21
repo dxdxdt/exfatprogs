@@ -2331,3 +2331,76 @@ void exfat_print_iostat(void)
 			invalid ? "false" : "true");
 #endif
 }
+
+void exfat_normalpath_logical(char *path, const char sep)
+{
+	size_t len = strlen(path);
+	char *parent;
+
+	/*
+	 * This looks like a mess in terms of CPU cycles, but you can't really
+	 * win without sacrificing memory footprint. Yes, it's O(N^2) in the
+	 * worse case scenario where the input string looks like this:
+	 *
+	 *    "/../../../../../../../../../../../../../../../.." (15 restarts)
+	 *
+	 * But I'm sure it's a good trade-off because memory allocation or
+	 * separator(/) scanning is way more expensive.
+	 */
+restart:
+	path[len] = 0;
+	if (len < 2)
+		return;
+	parent = path;
+
+	for (size_t i = 1; i < len;) {
+		if (path[i - 1] == sep && path[i] == sep) {
+			/* double sep(//) */
+			memmove(&path[i - 1], &path[i], len - i);
+			len -= 1;
+			goto newsize;
+		} else if (path[i - 1] == sep && path[i] == '.') {
+			if (path[i + 1] == 0 || path[i + 1] == sep) {
+				/* single dot */
+				memmove(&path[i], &path[i + 1], len - i);
+				len -= 1;
+				goto restart;
+			}
+			if (i + 1 < len && path[i + 1] == '.' &&
+					(path[i + 2] == sep || path[i + 2] == 0)) {
+				/* double dot */
+				memmove(parent, &path[i + 2], len - i - 2);
+				len -= &path[i + 2] - parent;
+				if (len == 0)
+					/* Don't cut the root! */
+					len = 1;
+				goto restart;
+			}
+			goto uneventful;
+		}
+uneventful:
+		if (path[i - 1] == sep)
+			parent = &path[i - 1];
+		i++;
+		continue;
+newsize:
+		path[len] = 0;
+	}
+
+	/* Remove trailing sep */
+	while (len > 1 && path[len - 1] == sep)
+		path[--len] = 0;
+}
+
+void exfat_normalpath_logical_scrub(char *path, const char sep)
+{
+	size_t a, b;
+
+	a = strlen(path);
+	exfat_normalpath_logical(path, sep);
+	b = strlen(path);
+
+	assert(a >= b);
+	if (a > b)
+		memset(path + b, 0, a - b);
+}
