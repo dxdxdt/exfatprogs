@@ -309,6 +309,7 @@ int exfat_discard_blocks(int fd, uint64_t start, uint64_t len);
 int exfat_secerase_blocks(int fd, uint64_t start, uint64_t len);
 /* BLKZEROOUT wrapper (for devices that support it) */
 int exfat_zeroout_blocks(int fd, uint64_t start, uint64_t len);
+int exfat_dealloc_file_range(int fd, off_t ofs, off_t len);
 
 size_t exfat_utf16_len(const __le16 *str, size_t max_size);
 ssize_t exfat_utf16_enc(const char *in_str, __u16 *out_str, size_t out_size);
