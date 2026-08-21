@@ -220,7 +220,7 @@ jobs:
         BUILD_DIR="$(pwd)"
         "${CONFIG_SCRIPT}"
         make -j$((`nproc`+1))
-        sudo make install
+        sudo make check install
         popd
 
         rm -rf "$BUILD_DIR"

@@ -52,8 +52,9 @@ PKG_CHECK_MODULES([BLKID], [blkid >= 2.20], [AC_DEFINE([HAVE_BLKID], [1], [Defin
 	[PKG_CHECK_MODULES([EXT2_BLKID], [blkid], [AC_DEFINE([HAVE_EXT2_BLKID], [1], [Define if libblkid is from libext2])])])
 
 AC_ARG_ENABLE([tests],
-	AS_HELP_STRING([--enable-tests], [build internal test programs])
-	[enable_tests=yes]
+	AS_HELP_STRING([--enable-tests], [always build internal test programs (not just for "make check")]),
+	[enable_tests=$enableval],
+	[enable_tests=no]
 )
 AM_CONDITIONAL([ENABLE_TESTS], [test "x$enable_tests" = xyes])
 
