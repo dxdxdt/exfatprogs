@@ -940,6 +940,47 @@ int exfat_zeroout_blocks(int fd, uint64_t start, uint64_t len)
 #endif
 }
 
+#if defined(__NetBSD__)
+extern int fdiscard(int fd, off_t pos, off_t length) __attribute__((weak));
+#endif
+
+int exfat_dealloc_file_range(int fd, off_t ofs, off_t len)
+{
+	int ret = -1;
+#if !EXFAT_NO_IOSTATS
+	struct timespec ts_a, ts_b;
+
+	exfat_getts(&ts_a);
+#endif
+
+#if defined(FALLOC_FL_PUNCH_HOLE) && defined(FALLOC_FL_KEEP_SIZE)
+	ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE, ofs, len);
+#elif defined(SPACECTL_DEALLOC) /* FreeBSD */
+	const struct spacectl_range rqsr = {
+		.r_offset = ofs,
+		.r_len = len,
+	};
+
+	ret = fspacectl(fd, SPACECTL_DEALLOC, &rqsr, 0, NULL);
+#elif defined(__NetBSD__)
+	if (fdiscard != NULL)
+		ret = fdiscard(fd, ofs, len);
+#else
+	errno = ENOSYS;
+#endif
+
+	if (ret)
+		return errno;
+#if !EXFAT_NO_IOSTATS
+	exfat_getts(&ts_b);
+	exfat_tssub(&ts_b, &ts_a, &ts_b);
+	exfat_tsadd(&ts_b, &io_stat.discard.time, &io_stat.discard.time);
+	io_stat.discard.len = exfat_iostat_ofsadd(io_stat.discard.len, len, EXFAT_IOSTAT_DISCARD);
+#endif
+
+	return 0;
+}
+
 size_t exfat_utf16_len(const __le16 *str, size_t max_size)
 {
 	size_t i = 0;
