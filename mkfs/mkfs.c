@@ -1192,13 +1192,27 @@ static int exfat_zero_out_disk(struct exfat_blk_dev *bd,
 	const void *zm = NULL;
 	size_t iosize;
 	unsigned long long target_zerolen;
+#ifdef POSIX_FADV_NOREUSE
+	bool issued_fadvise = false;
+#endif
 
 	assert(ui->cluster_size > 0);
 
 	if (ui->quick)
 		target_zerolen = MIN(bd->size, EXFAT_HEAD_ZERO_OUT);
-	else
+	else {
 		target_zerolen = bd->size;
+#ifdef POSIX_FADV_NOREUSE
+		/*
+		 * Unfortunately, Linux kernel hadn't supported this fadvise()
+		 * op properly until quite recently. See posix_fadvise(2).
+		 *
+		 *   - relevant code in kernel: vma_has_recency()
+		 *   - currently, the offset and length are ignored by the kernel
+		 */
+		issued_fadvise = posix_fadvise(bd->dev_fd, 0, 0, POSIX_FADV_NOREUSE) == 0;
+#endif
+	}
 
 	if (!quiet) {
 		exfat_info("Zeroing out %llu bytes: ", target_zerolen);
@@ -1284,6 +1298,24 @@ out:
 			exfat_info("done\n");
 		exfat_debug("zero out written size : %llu\n", target_zerolen);
 	}
+
+#ifdef POSIX_FADV_NOREUSE
+	/*
+	 * Restore the default fmode so that the volume structures(header,
+	 * bitmap, upcase table ...) are cached as usual. The fs implementation
+	 * would appreciate it when the volume is mounted immediately
+	 * afterwards.
+	 *
+	 * The #ifdef checks against POSIX_FADV_NOREUSE, but POSIX_FADV_NORMAL
+	 * is used here. This is intentional - it wouldn't make sense for the
+	 * platform to support POSIX_FADV_NOREUSE but not POSIX_FADV_NORMAL.
+	 * ie, this shouldn't happen:
+	 *
+	 *   defined(POSIX_FADV_NOREUSE) && !defined(POSIX_FADV_NORMAL)
+	 */
+	if (issued_fadvise)
+		posix_fadvise(bd->dev_fd, 0, 0, POSIX_FADV_NORMAL);
+#endif
 
 	return ret;
 }
