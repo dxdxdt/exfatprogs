@@ -48,8 +48,10 @@ struct exfat_fsck exfat_fsck;
 struct exfat_stat exfat_stat;
 struct path_resolve_ctx path_resolve_ctx;
 
-#define OPTID_PUT_MBR	(128 + 0)
-#define OPTID_CLEAR_MBR	(128 + 1)
+enum longopt_num {
+	LON_PUT_MBR = CHAR_MAX + 1,
+	LON_CLEAR_MBR,
+};
 
 static struct option opts[] = {
 	{"repair",		no_argument,		NULL,	'r' },
@@ -63,8 +65,8 @@ static struct option opts[] = {
 	{"?",			no_argument,		NULL,	'?' },
 	{"ignore-bad-fs",	no_argument,		NULL,	'b' },
 	{"progress",		no_argument,		NULL,	'P' },
-	{"put-mbr",		no_argument,		NULL,	OPTID_PUT_MBR },
-	{"clear-mbr",		no_argument,		NULL,	OPTID_CLEAR_MBR },
+	{"put-mbr",		no_argument,		NULL,	LON_PUT_MBR },
+	{"clear-mbr",		no_argument,		NULL,	LON_CLEAR_MBR },
 	{NULL, 0, NULL, 0}
 };
 
@@ -2026,12 +2028,12 @@ int main(int argc, char * const argv[])
 		case 'P':
 			ui.options |= FSCK_OPTS_PROGRESS_BAR;
 			break;
-		case OPTID_PUT_MBR:
+		case LON_PUT_MBR:
 			if (exfat_fsck.mbr)
 				usage(argv[0]);
 			exfat_fsck.mbr = 1;
 			break;
-		case OPTID_CLEAR_MBR:
+		case LON_CLEAR_MBR:
 			if (exfat_fsck.mbr)
 				usage(argv[0]);
 			exfat_fsck.mbr = -1;
