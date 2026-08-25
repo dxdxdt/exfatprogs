@@ -498,6 +498,7 @@ extern unsigned int print_level;
 #define EXFAT_ERROR	(1)
 #define EXFAT_INFO	(2)
 #define EXFAT_DEBUG	(3)
+#define EXFAT_TRACE0	(4)
 
 #define exfat_msg(level, dir, fmt, ...)					\
 	do {								\
@@ -513,6 +514,9 @@ extern unsigned int print_level;
 #define exfat_debug(fmt, ...)	exfat_msg(EXFAT_DEBUG, stdout,		\
 					"[%s:%4d] " fmt, __func__, 	\
 					__LINE__, ##__VA_ARGS__)
+#define exfat_trace(N, fmt, ...)	exfat_msg(EXFAT_TRACE0 + (N),	\
+					stdout, "[%s:%4d] " fmt,	\
+					__func__, __LINE__, ##__VA_ARGS__)
 
 #define exfat_print_guid(f, msg, guid)					\
 		f("%s: %02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",\
