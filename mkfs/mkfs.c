@@ -870,9 +870,11 @@ static void usage(void)
 	exit(EXIT_FAILURE);
 }
 
-#define PACK_BITMAP	(CHAR_MAX + 1)
-#define UPCASE_FILE	(CHAR_MAX + 2)
-#define BOOTCODE_MSG	(CHAR_MAX + 3)
+enum longopt_num {
+	LON_PACK_BITMAP = CHAR_MAX + 1,
+	LON_UPCASE_FILE,
+	LON_BOOTCODE_MSG,
+};
 
 static const struct option opts[] = {
 	{"volume-label",	required_argument,	NULL,	'L' },
@@ -880,9 +882,9 @@ static const struct option opts[] = {
 	{"sector-size",		required_argument,	NULL,	's' },
 	{"cluster-size",	required_argument,	NULL,	'c' },
 	{"boundary-align",	required_argument,	NULL,	'b' },
-	{"upcase",		required_argument,	NULL,	UPCASE_FILE },
-	{"bootcode-msg",	required_argument,	NULL,	BOOTCODE_MSG },
-	{"pack-bitmap",		no_argument,		NULL,	PACK_BITMAP },
+	{"upcase",		required_argument,	NULL,	LON_UPCASE_FILE },
+	{"bootcode-msg",	required_argument,	NULL,	LON_BOOTCODE_MSG },
+	{"pack-bitmap",		no_argument,		NULL,	LON_PACK_BITMAP },
 	{"full-format",		no_argument,		NULL,	'f' },
 	{"force",		no_argument,		NULL,	'F' },
 	{"check-written",	no_argument,		NULL,	'C' },
@@ -1512,13 +1514,13 @@ int main(int argc, char *argv[])
 			}
 			ui.boundary_align = ret;
 			break;
-		case UPCASE_FILE:
+		case LON_UPCASE_FILE:
 			ui.upcase.file = optarg;
 			break;
-		case PACK_BITMAP:
+		case LON_PACK_BITMAP:
 			ui.pack_bitmap = true;
 			break;
-		case BOOTCODE_MSG:
+		case LON_BOOTCODE_MSG:
 			ui.bootcode_msg = optarg;
 			/* A long message will just get truncated silently. */
 			break;
