@@ -99,6 +99,10 @@ const char *dummy_bootcode_msg = DEFAULT_DUMMY_BOOTCODE_MSG;
 #define EXFAT_IOSTAT_WRITE	(0x02)
 #define EXFAT_IOSTAT_DISCARD	(0x04)
 #define EXFAT_IOSTAT_SYNC	(0x08)
+#define EXFAT_IOSTAT_ERRMASK	(0x0F)
+#define EXFAT_IOSTAT_ZEROOUT	(0x10)
+/* When set in err, BLKSECDISCARD was involved in discard stats */
+#define EXFAT_IOSTAT_SECURE	(0x20)
 
 static struct {
 	/* --- cacheline #1 --- */
@@ -116,6 +120,10 @@ static struct {
 		off_t len;
 		struct timespec time;
 	} discard;
+	struct {
+		off_t len;
+		struct timespec time;
+	} zero;
 	int err;
 	int ovf;
 } io_stat;
@@ -864,7 +872,7 @@ int exfat_fsync(int fd)
 	return ret;
 }
 
-int exfat_discard_blocks(int fd, uint64_t start, uint64_t len)
+static int issue_blockrange_ioctl(int fd, int cmd, uint64_t start, uint64_t len)
 {
 	uint64_t range[2] = { start, len };
 #if !EXFAT_NO_IOSTATS
@@ -872,17 +880,64 @@ int exfat_discard_blocks(int fd, uint64_t start, uint64_t len)
 
 	exfat_getts(&ts_a);
 #endif
-	if (ioctl(fd, BLKDISCARD, &range) < 0)
+	if (ioctl(fd, cmd, &range) < 0)
 		return errno;
 #if !EXFAT_NO_IOSTATS
 	exfat_getts(&ts_b);
-
 	exfat_tssub(&ts_b, &ts_a, &ts_b);
-	exfat_tsadd(&ts_b, &io_stat.discard.time, &io_stat.discard.time);
-	io_stat.discard.len = exfat_iostat_ofsadd(io_stat.discard.len, len, EXFAT_IOSTAT_DISCARD);
+
+#if defined(BLKSECDISCARD) && defined(BLKDISCARD)
+	if (cmd == BLKSECDISCARD) {
+		io_stat.err |= EXFAT_IOSTAT_SECURE;
+		cmd = BLKDISCARD;
+	}
+#endif
+	switch (cmd) {
+#ifdef BLKDISCARD
+	case BLKDISCARD:
+		exfat_tsadd(&ts_b, &io_stat.discard.time, &io_stat.discard.time);
+		io_stat.discard.len = exfat_iostat_ofsadd(io_stat.discard.len,
+							  len, EXFAT_IOSTAT_DISCARD);
+		break;
+#endif
+#ifdef BLKZEROOUT
+	case BLKZEROOUT:
+		exfat_tsadd(&ts_b, &io_stat.zero.time, &io_stat.zero.time);
+		io_stat.zero.len = exfat_iostat_ofsadd(io_stat.zero.len, len,
+						       EXFAT_IOSTAT_ZEROOUT);
+		break;
+#endif
+	}
 #endif
 
 	return 0;
+}
+
+int exfat_discard_blocks(int fd, uint64_t start, uint64_t len)
+{
+#ifdef BLKDISCARD
+	return issue_blockrange_ioctl(fd, BLKDISCARD, start, len);
+#else
+	return ENOSYS;
+#endif
+}
+
+int exfat_secerase_blocks(int fd, uint64_t start, uint64_t len)
+{
+#ifdef BLKSECDISCARD
+	return issue_blockrange_ioctl(fd, BLKSECDISCARD, start, len);
+#else
+	return ENOSYS;
+#endif
+}
+
+int exfat_zeroout_blocks(int fd, uint64_t start, uint64_t len)
+{
+#ifdef BLKZEROOUT
+	return issue_blockrange_ioctl(fd, BLKZEROOUT, start, len);
+#else
+	return ENOSYS;
+#endif
 }
 
 size_t exfat_utf16_len(const __le16 *str, size_t max_size)
@@ -2234,36 +2289,43 @@ void exfat_print_iostat(void)
 	if (get_intbool_envvar("EXFAT_PRINT_IOSTAT") <= 0)
 		return;
 
-	invalid = io_stat.err | io_stat.ovf;
+	invalid = (io_stat.err & EXFAT_IOSTAT_ERRMASK) | io_stat.ovf;
 	exfat_tsadd(&total, &io_stat.time.read, &total);
 	exfat_tsadd(&total, &io_stat.time.write, &total);
 	exfat_tsadd(&total, &io_stat.time.sync, &total);
 	exfat_tsadd(&total, &io_stat.discard.time, &total);
+	exfat_tsadd(&total, &io_stat.zero.time, &total);
 
 	fprintf(stderr, "IO stats:\n"
-			"  read:    %ld.%06lds %lld %s%s\n"
-			"  write:   %ld.%06lds %lld %s%s\n"
-			"  discard: %ld.%06lds %lld %s\n"
-			"  sync:    %ld.%06lds %s\n"
+			"  read:    %ld.%06lds %lld%s%s\n"
+			"  write:   %ld.%06lds %lld%s%s\n"
+			"  discard: %ld.%06lds %lld%s%s\n"
+			"  zero:    %ld.%06lds %lld%s\n"
+			"  sync:    %ld.%06lds%s\n"
 			"  total:   %ld.%06lds\n"
 			"  valid:   %s\n",
 			(long)io_stat.time.read.tv_sec,
 			(long)io_stat.time.read.tv_nsec / 1000,
 			(long long)io_stat.len.read,
-			io_stat.err & EXFAT_IOSTAT_READ ? "ERR" : "",
-			io_stat.ovf & EXFAT_IOSTAT_READ ? "OVF" : "",
+			io_stat.err & EXFAT_IOSTAT_READ ? " ERR" : "",
+			io_stat.ovf & EXFAT_IOSTAT_READ ? " OVF" : "",
 			(long)io_stat.time.write.tv_sec,
 			(long)io_stat.time.write.tv_nsec / 1000,
 			(long long)io_stat.len.write,
-			io_stat.err & EXFAT_IOSTAT_WRITE ? "ERR" : "",
-			io_stat.ovf & EXFAT_IOSTAT_WRITE ? "OVF" : "",
+			io_stat.err & EXFAT_IOSTAT_WRITE ? " ERR" : "",
+			io_stat.ovf & EXFAT_IOSTAT_WRITE ? " OVF" : "",
 			(long)io_stat.discard.time.tv_sec,
 			(long)io_stat.discard.time.tv_nsec / 1000,
 			(long long)io_stat.discard.len,
-			io_stat.ovf & EXFAT_IOSTAT_DISCARD ? "OVF" : "",
+			io_stat.err & EXFAT_IOSTAT_SECURE ? " SEC" : "",
+			io_stat.ovf & EXFAT_IOSTAT_DISCARD ? " OVF" : "",
+			(long)io_stat.zero.time.tv_sec,
+			(long)io_stat.zero.time.tv_nsec / 1000,
+			(long long)io_stat.zero.len,
+			io_stat.ovf & EXFAT_IOSTAT_ZEROOUT ? " OVF" : "",
 			(long)io_stat.time.sync.tv_sec,
 			(long)io_stat.time.sync.tv_nsec / 1000,
-			io_stat.err & EXFAT_IOSTAT_SYNC ? "ERR" : "",
+			io_stat.err & EXFAT_IOSTAT_SYNC ? " ERR" : "",
 			(long)total.tv_sec,
 			(long)total.tv_nsec / 1000,
 			invalid ? "false" : "true");

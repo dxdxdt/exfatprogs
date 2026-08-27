@@ -299,7 +299,16 @@ bool exfat_write_full(int fd, const void *buf, size_t size, off_t offset);
 int exfat_write_zero(int fd, off_t size, off_t offset);
 int exfat_write_zero2(int fd, off_t size, off_t offset, size_t bs);
 int exfat_fsync(int fd);
+/* BLKDISCARD wrapper */
 int exfat_discard_blocks(int fd, uint64_t start, uint64_t len);
+/*
+ * BLKSECDISCARD wrapper (for sdcards that support it)
+ *
+ * Link: https://lwn.net/Articles/395147/
+ */
+int exfat_secerase_blocks(int fd, uint64_t start, uint64_t len);
+/* BLKZEROOUT wrapper (for devices that support it) */
+int exfat_zeroout_blocks(int fd, uint64_t start, uint64_t len);
 
 size_t exfat_utf16_len(const __le16 *str, size_t max_size);
 ssize_t exfat_utf16_enc(const char *in_str, __u16 *out_str, size_t out_size);
