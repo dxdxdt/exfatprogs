@@ -4,6 +4,7 @@
  */
 
 #ifndef _UPCASE_TABLE_H
+#define _UPCASE_TABLE_H
 
 #define EXFAT_UPCASE_TABLE_CHKSUM (0xE619D30D)
 

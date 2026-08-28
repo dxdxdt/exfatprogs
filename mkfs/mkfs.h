@@ -4,6 +4,7 @@
  */
 
 #ifndef _MKFS_H
+#define _MKFS_H
 #include <sys/types.h>
 #include <stdint.h>
 #include <stddef.h>

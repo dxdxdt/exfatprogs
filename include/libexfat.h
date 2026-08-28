@@ -4,6 +4,7 @@
  */
 
 #ifndef _LIBEXFAT_H
+#define _LIBEXFAT_H
 
 #include <stdbool.h>
 #include <sys/types.h>
