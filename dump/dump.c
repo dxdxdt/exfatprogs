@@ -86,6 +86,27 @@ static int exfat_read_dentry(struct exfat *exfat, struct exfat_inode *inode,
 	return 0;
 }
 
+#define VOLUME_FLAGS_STR_SIZE (46)
+
+static void volume_flags_tostr(const uint16_t vol_flags, const size_t size, char *out)
+{
+	snprintf(out, size, "%s%s%s%s",
+		vol_flags & VOL_ACTIVE_FAT ?	"ACTIVE_FAT " :		"",
+		vol_flags & VOL_DIRTY ?		"DIRTY " :		"",
+		vol_flags & VOL_MEDIA_FAILURE ?	"MEDIA_FAILURE " :	"",
+		vol_flags & VOL_CLEAR_TO_ZERO ?	"CLEAR_TO_ZERO " :	"");
+}
+
+#define PERC_IN_USE_STR_SIZE (13)
+
+static void perc_in_use_tostr(const uint8_t x, const size_t size, char *out)
+{
+	if (0 <= x && x <= 100)
+		snprintf(out, size, "%u", x);
+	else
+		snprintf(out, size, "unknown (%02x)", x);
+}
+
 static int exfat_show_fs_info(struct exfat *exfat)
 {
 	struct pbr *ppbr;
@@ -98,6 +119,9 @@ static int exfat_show_fs_info(struct exfat *exfat)
 	int ret;
 	char *volume_label;
 	off_t off;
+	char vol_flags_str[VOLUME_FLAGS_STR_SIZE];
+	char perc_in_use_str[PERC_IN_USE_STR_SIZE];
+	uint16_t vol_flags;
 
 	ppbr = exfat->bs;
 	if (memcmp(ppbr->bpb.oem_name, "EXFAT   ", 8) != 0) {
@@ -120,6 +144,12 @@ static int exfat_show_fs_info(struct exfat *exfat)
 		return -EINVAL;
 	}
 
+	vol_flags = le16_to_cpu(pbsx->vol_flags);
+	vol_flags_str[0] = 0;
+	volume_flags_tostr(vol_flags, sizeof(vol_flags_str), vol_flags_str);
+	perc_in_use_str[0] = 0;
+	perc_in_use_tostr(pbsx->perc_in_use, sizeof(perc_in_use_str), perc_in_use_str);
+
 	bd->sector_size_bits = pbsx->sect_size_bits;
 	bd->sector_size = 1 << pbsx->sect_size_bits;
 
@@ -128,18 +158,24 @@ static int exfat_show_fs_info(struct exfat *exfat)
 	root_clu = le32_to_cpu(pbsx->root_cluster);
 
 	exfat_info("-------------- Dump Boot sector region --------------\n");
-	dump_field("Volume Length(sectors)", "%" PRIu64,
-			le64_to_cpu(pbsx->vol_length));
-	dump_field("FAT Offset(sector offset)", "%u",
-			le32_to_cpu(pbsx->fat_offset));
-	dump_field("FAT Length(sectors)", "%u",
-			le32_to_cpu(pbsx->fat_length));
+	dump_field("Volume Length(sectors)", "%" PRIu64, le64_to_cpu(pbsx->vol_length));
+	dump_field("FAT Offset(sector offset)", "%u", le32_to_cpu(pbsx->fat_offset));
+	dump_field("FAT Length(sectors)", "%u", le32_to_cpu(pbsx->fat_length));
 	dump_field("Cluster Heap Offset (sector offset)", "%u", clu_offset);
 	dump_field("Cluster Count", "%u", total_clus);
 	dump_field("Root Cluster (cluster offset)", "%u", root_clu);
 	dump_field("Volume Serial", "0x%x", le32_to_cpu(pbsx->vol_serial));
+	dump_field("Version", "%02x%02x", pbsx->fs_version[0], pbsx->fs_version[1]);
+	dump_field("Volume Flags", "%s%04x", vol_flags_str, vol_flags & VOL_RESERVED);
 	dump_field("Bytes per Sector", "%u", 1 << pbsx->sect_size_bits);
 	dump_field("Sectors per Cluster", "%u", 1 << pbsx->sect_per_clus_bits);
+	dump_field("Number of FATs", "%u", pbsx->num_fats);
+	dump_field("Drive Select (advisory)", "%02x", pbsx->phy_drv_no);
+	dump_field("Percent in Use (advisory)", "%s", perc_in_use_str);
+	dump_field("Reserved", "%02x%02x%02x%02x%02x%02x%02x",
+			pbsx->reserved2[0], pbsx->reserved2[1], pbsx->reserved2[2],
+			pbsx->reserved2[3], pbsx->reserved2[4], pbsx->reserved2[5],
+			pbsx->reserved2[6]);
 
 	bd->cluster_size =
 		1 << (pbsx->sect_per_clus_bits + pbsx->sect_size_bits);
