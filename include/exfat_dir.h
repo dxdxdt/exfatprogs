@@ -68,6 +68,9 @@ union exfat_timestamp {
 	};
 };
 
+#define EXFAT_TRAVERSAL_BF	(0x00) /* breadth-first */
+struct exfat_traverse; /* Opaque object */
+
 int exfat_de_iter_init(struct exfat_de_iter *iter, struct exfat *exfat,
 		       struct exfat_inode *dir, struct buffer_desc *bd);
 int exfat_de_iter_get(struct exfat_de_iter *iter,
@@ -117,5 +120,60 @@ int exfat_alloc_cluster(struct exfat *exfat, struct exfat_inode *inode,
 
 int exfat_format_timestamp(char *out, size_t size,
 		const union exfat_timestamp *ts, uint8_t cs, uint8_t tz);
+
+/*
+ * fts()-like directory traversal facilities
+ *
+ * The directory traversal code is copied and pasted in utils including dump,
+ * exfat2img and defrag. fsck deserves its own implementation as it requires
+ * ability to modify the directory structure on the fly, but the rest of the
+ * utils can get away with just a read-only ability to traverse directories.
+ * These facilities are en effort to round up and simplify the directory
+ * traversal code across the project.
+ *
+ * Refer to fts(3) and twalk(3) for nomenclature used here.
+ *
+ * If the visit is postorder(the directory is being removed from the stack),
+ * the read function sets the inode to NULL. Otherwise, the inode pointer is set
+ * to point a valid object allocated internally and ready to use by the caller.
+ * The visit order depends on on the value of node->attr. If it has ATTR_SUBDIR
+ * set, the order is preorder. Otherwise, the order is leaf.
+ *
+ * Note that if the directory turns out to be empty in postorder, the read
+ * function sets the inode NULL to indicate that.
+ *
+ * The exfat_traverse object can closed anytime to abandon the traversal. The
+ * inode object returned from the read function must not be freed as the
+ * lifespan of the object is managed with the context object.
+ */
+
+/*
+ * Begin a directory traversal
+ *
+ * Currently, only EXFAT_TRAVERSAL_BF is supported. On failure, errno is set to
+ * indicate the error.
+ *
+ *  - ENOMEM
+ *  - ENOTDIR if node is not a directory
+ *  - EINVAL on wrong flags
+ */
+struct exfat_traverse *exfat_traverse_open(struct exfat_inode *node, int flags);
+/*
+ * Close and deallocate all the dynamically allocated resourced for the context.
+ */
+void exfat_traverse_close(struct exfat_traverse *ctx);
+/*
+ * Read and return an inode
+ *
+ * Returns 1 if the op was successful the node is set to either NULL or an
+ * address to a valid inode object. Returns 0 if there are no more nodes left to
+ * traverse(end of traversal).
+ */
+int exfat_traverse_read(struct exfat_traverse *ctx, struct exfat_inode **node);
+/*
+ * Mark the current node to skip it. No descendants of the directory will be
+ * visited.
+ */
+int exfat_traverse_skip(struct exfat_traverse *ctx);
 
 #endif

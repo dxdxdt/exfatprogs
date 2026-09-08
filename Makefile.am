@@ -2,7 +2,7 @@
 
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = lib mkfs fsck tune label dump exfat2img upcase dosattr
+SUBDIRS = lib mkfs fsck tune label dump exfat2img upcase dosattr debug
 
 # manpages
 dist_man1_MANS =
@@ -32,5 +32,6 @@ if ENABLE_FTS
 dist_man1_MANS +=		\
 	manpages/lsdosattr.1	\
 	manpages/chdosattr.1
+dist_man8_MANS += manpages/debug.exfat.8
 
 endif

@@ -11,6 +11,7 @@
 #include <string.h>
 #include <time.h>
 #include <inttypes.h>
+#include <assert.h>
 
 #include "exfat_ondisk.h"
 #include "libexfat.h"
@@ -18,6 +19,12 @@
 #include "exfat_dir.h"
 
 static struct path_resolve_ctx path_resolve_ctx;
+
+struct exfat_traverse {
+	void *uctx;
+	struct exfat_inode *node;
+	struct list_head list;
+};
 
 #define fsck_err(parent, inode, fmt, ...)		\
 ({							\
@@ -1093,3 +1100,20 @@ int exfat_format_timestamp(char *out, size_t size,
 	return snprintf(out, size, "%04u-%02u-%02uT%02u:%02u:%02u.%03u%s",
 			year, mon, day, hour, min, msec / 1000, msec % 1000, tz_part);
 }
+
+// int exfat_traverse_dir(struct exfat_inode *dir, exfat_trav_cb_t callback,
+// 		void *uctx)
+// {
+// 	struct trav_ctx tctx;
+// 	int err;
+
+// 	assert(dir->attr & ATTR_SUBDIR);
+// 	INIT_LIST_HEAD(&tctx.list);
+
+// 	do {
+// 		dir = list_entry(list.next, struct exfat_inode, list);
+// 		assert(dir->attr & ATTR_SUBDIR);
+
+// 		list_del(&dir->list);
+// 	} while (!list_empty(&list));
+// }
